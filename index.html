@@ -5,16 +5,25 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>喫茶すず〜 ハンディレジ</title>
 <script src="https://cdn.tailwindcss.com"></script>
-<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+
+<!-- jsDelivrをメインCDNに使用（unpkgより多くの環境で安定して読み込めるため）。
+     万一jsDelivrが読み込めない環境向けに、onerrorでunpkgへ自動フォールバックします。 -->
+<script crossorigin src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"
+  onerror="this.onerror=null;var s=document.createElement('script');s.src='https://unpkg.com/react@18/umd/react.production.min.js';s.crossOrigin='anonymous';document.head.appendChild(s);"></script>
+<script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"
+  onerror="this.onerror=null;var s=document.createElement('script');s.src='https://unpkg.com/react-dom@18/umd/react-dom.production.min.js';s.crossOrigin='anonymous';document.head.appendChild(s);"></script>
+<script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7/babel.min.js"
+  onerror="this.onerror=null;var s=document.createElement('script');s.src='https://unpkg.com/@babel/standalone@7/babel.min.js';document.head.appendChild(s);"></script>
+
 <style>
   html, body { margin: 0; padding: 0; background: #0f172a; }
   #root { min-height: 100vh; }
+  #boot-error { display:none; color:#fca5a5; background:#1f2937; font-family:monospace; font-size:12px; white-space:pre-wrap; padding:16px; }
 </style>
 </head>
 <body>
 <div id="root"></div>
+<div id="boot-error"></div>
 
 <script>
 /* ============================================================
@@ -82,11 +91,21 @@ window.storage = {
   list: async () => ({ keys: [] }),
 };
 
-/* 他の端末がデータを更新したら、20秒ごとに検知して自動でページを再読込します。
+/* 他の端末がデータを更新したら検知して自動でページを再読込します。
    ※ 入力途中の未確定な下書き（例：買い出しの品名欄など）は失われる場合が
-   ありますが、確定済みの注文・経費・シフトなどは全て保存済みなので消えません。 */
+   ありますが、確定済みの注文・経費・シフトなどは全て保存済みなので消えません。
+
+   ★ 修正: 固定間隔のポーリングだけだと「タブを切り替えて戻ってきた直後」
+   などに最大でポーリング間隔ぶんの時間差が生じていました。
+   間隔を短縮した上で、タブが再表示された瞬間・ウィンドウにフォーカスが
+   戻った瞬間にも即座にチェックするようにし、体感の時間差を解消します。 */
 const SUZU_STORAGE_KEY = "kissa-suzu-pos-store";
-setInterval(async () => {
+const SUZU_POLL_INTERVAL_MS = 6000; // 20秒 → 6秒に短縮
+let _suzuPollInFlight = false;
+
+async function suzuCheckForUpdate() {
+  if (_suzuPollInFlight) return; // 前回のチェックが終わっていなければ重複実行しない
+  _suzuPollInFlight = true;
   try {
     const row = await sbFetchRow(SUZU_STORAGE_KEY);
     if (row && _lastKnownUpdatedAt && row.updated_at !== _lastKnownUpdatedAt) {
@@ -94,13 +113,26 @@ setInterval(async () => {
     }
   } catch (e) {
     /* 通信エラーは無視して次回ポーリングでリトライ */
+  } finally {
+    _suzuPollInFlight = false;
   }
-}, 20000);
+}
+
+setInterval(suzuCheckForUpdate, SUZU_POLL_INTERVAL_MS);
+
+// タブが再びアクティブになった瞬間・ウィンドウにフォーカスが戻った瞬間に即チェック
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") suzuCheckForUpdate();
+});
+window.addEventListener("focus", suzuCheckForUpdate);
 
 </script>
 
-<script type="text/babel" data-presets="react">
+<!-- JSXソースはテキストとしてそのまま保持し、下のスクリプトで明示的な
+     オプション（runtime: "classic"）を指定してBabelに変換させます。 -->
+<script id="app-source" type="text/plain">
 const { useState, useEffect, useCallback, useRef } = React;
+
 /* ============================================================
    lucide-react の代替アイコン（外部依存なし・インラインSVG）
    ============================================================ */
@@ -1033,6 +1065,61 @@ function PosRegister() {
     .filter((o) => new Date(o.time).toDateString() === new Date().toDateString())
     .reduce((s, o) => s + o.total, 0);
 
+  /* ============================================================
+     ★ 営業終了レポート（本日の売上サマリーをLINEに送信）
+     ============================================================ */
+  const buildDailyClosingText = () => {
+    const today = new Date();
+    const todayOrders = orders.filter((o) => new Date(o.time).toDateString() === today.toDateString());
+    const total = todayOrders.reduce((s, o) => s + o.total, 0);
+    const count = todayOrders.length;
+    const itemCount = {};
+    const tableCount = {};
+    todayOrders.forEach((o) => {
+      tableCount[o.table] = (tableCount[o.table] || 0) + 1;
+      o.lines.forEach((l) => {
+        itemCount[l.name] = (itemCount[l.name] || 0) + l.qty;
+      });
+    });
+    const topItems = Object.entries(itemCount).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    const todayExpenseTotal = expenses
+      .filter((e) => e.date === today.toISOString().slice(0, 10))
+      .reduce((s, e) => s + e.amount, 0);
+    const dateLabel = today.toLocaleDateString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" });
+    const lines = [
+      "【喫茶すず〜 本日の営業終了レポート】",
+      dateLabel,
+      `売上合計: ${yen(total)}`,
+      `会計件数: ${count}件`,
+      `対応卓数: ${Object.keys(tableCount).length}卓`,
+    ];
+    if (topItems.length) {
+      lines.push(`人気商品: ${topItems.map(([n, q]) => `${n}×${q}`).join("、")}`);
+    } else {
+      lines.push("本日の会計データはまだありません");
+    }
+    if (todayExpenseTotal > 0) {
+      lines.push(`本日の経費: ${yen(todayExpenseTotal)}`);
+    }
+    lines.push("");
+    lines.push("本日もお疲れ様でした🌙");
+    return lines.join("\n");
+  };
+  const sendClosingReportToLine = () => {
+    const text = buildDailyClosingText();
+    const url = `https://line.me/R/msg/text/?${encodeURIComponent(text)}`;
+    window.open(url, "_blank");
+  };
+  const copyClosingReport = async () => {
+    const text = buildDailyClosingText();
+    try {
+      await navigator.clipboard.writeText(text);
+      showFlash("コピーしました");
+    } catch {
+      showFlash("コピーに失敗しました");
+    }
+  };
+
   const grouped = CATEGORY_ORDER.map((cat) => ({ cat, items: menuItems.filter((m) => m.category === cat) })).filter(
     (g) => g.items.length > 0
   );
@@ -1636,6 +1723,12 @@ function PosRegister() {
               <RotateCcw size={12} /> リセット
             </button>
           </div>
+          <button
+            onClick={sendClosingReportToLine}
+            className="w-full bg-[#06C755] text-white rounded-lg py-2 text-xs font-bold flex items-center justify-center gap-1.5 mb-2"
+          >
+            <Send size={13} /> 本日の営業を終了する（LINEに送信）
+          </button>
         </div>
       )}
 
@@ -2226,6 +2319,29 @@ function PosRegister() {
         {tab === "report" && (
           <div className="p-3 space-y-4">
             <div className="bg-teal-900/40 rounded-lg p-3 border border-teal-800">
+              <div className="text-teal-300 text-xs font-bold tracking-widest mb-1.5">営業終了処理</div>
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-sm text-slate-300">本日売上</div>
+                <div className="text-amber-300 font-bold text-lg">{yen(todayTotal)}</div>
+              </div>
+              <button
+                onClick={sendClosingReportToLine}
+                className="w-full bg-[#06C755] text-white rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-1.5"
+              >
+                <Send size={14} /> 本日の営業を終了する（LINEに送信）
+              </button>
+              <button
+                onClick={copyClosingReport}
+                className="w-full bg-slate-700 text-stone-100 rounded-lg py-2 text-sm font-bold flex items-center justify-center gap-1.5 mt-2"
+              >
+                <Copy size={14} /> テキストをコピー
+              </button>
+              <div className="text-[11px] text-slate-500 mt-1.5">
+                タップするとLINEアプリが開き、本日の売上サマリーを友だち・グループに送信できます（LINE未インストールの場合はブラウザで開きます）。
+              </div>
+            </div>
+
+            <div className="bg-teal-900/40 rounded-lg p-3 border border-teal-800">
               <div className="text-teal-300 text-xs font-bold tracking-widest mb-1.5">店舗エリア設定（天気・地域イベント検索用）</div>
               <div className="flex gap-2">
                 <input
@@ -2701,8 +2817,44 @@ function ShiftAddForm({ staffList, shiftAddMode, setShiftAddMode, onAdd, dow, mo
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<PosRegister />);
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(PosRegister));
+</script>
 
+<script>
+  function suzuBoot(attempt) {
+    attempt = attempt || 0;
+    if (typeof Babel === 'undefined' || typeof React === 'undefined' || typeof ReactDOM === 'undefined') {
+      // CDNの読み込みが（フォールバック経由なども含めて）まだ終わっていない可能性があるため、
+      // 最大3秒ほど少し待ってからリトライする（白紙のまま固まるのを防ぐ）
+      if (attempt < 15) {
+        setTimeout(function() { suzuBoot(attempt + 1); }, 200);
+        return;
+      }
+      var el = document.getElementById('boot-error');
+      el.style.display = 'block';
+      el.textContent = 'CDNからのライブラリ読み込みに失敗しました（React/ReactDOM/Babelのいずれか）。\n'
+        + 'ネットワークの広告ブロッカーやセキュリティソフトが jsdelivr.net / unpkg.com への通信をブロックしていないか確認してください。\n'
+        + 'React defined: ' + (typeof React !== 'undefined')
+        + ' / ReactDOM defined: ' + (typeof ReactDOM !== 'undefined')
+        + ' / Babel defined: ' + (typeof Babel !== 'undefined');
+      return;
+    }
+    try {
+      var src = document.getElementById('app-source').textContent;
+      var output = Babel.transform(src, {
+        presets: [["react", { runtime: "classic" }]],
+      }).code;
+      var s = document.createElement('script');
+      s.textContent = output;
+      document.body.appendChild(s);
+    } catch (e) {
+      var el = document.getElementById('boot-error');
+      el.style.display = 'block';
+      el.textContent = '起動時エラー:\n' + (e.stack || e.message || e);
+      console.error(e);
+    }
+  }
+  suzuBoot();
 </script>
 
 </body>
