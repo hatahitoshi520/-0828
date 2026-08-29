@@ -14,6 +14,8 @@
   onerror="this.onerror=null;var s=document.createElement('script');s.src='https://unpkg.com/react-dom@18/umd/react-dom.production.min.js';s.crossOrigin='anonymous';document.head.appendChild(s);"></script>
 <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7/babel.min.js"
   onerror="this.onerror=null;var s=document.createElement('script');s.src='https://unpkg.com/@babel/standalone@7/babel.min.js';document.head.appendChild(s);"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"
+  onerror="this.onerror=null;var s=document.createElement('script');s.src='https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js';document.head.appendChild(s);"></script>
 
 <style>
   html, body { margin: 0; padding: 0; background: #0f172a; }
@@ -523,6 +525,159 @@ function genId(prefix) {
   return prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
 
+/* ============================================================
+   ★ Excel 自動保存 ヘルパー
+   ------------------------------------------------------------
+   File System Access API（Chrome/Edgeのパソコン版で対応）を使い、
+   最初に1回だけ選んだローカルのExcelファイルへ、データ変更のたびに
+   自動で上書き保存する。ハンドルはIndexedDBに保存し、次回訪問時も
+   （許可が残っていれば）再度ファイル選択せずに使えるようにする。
+   ============================================================ */
+const EXCEL_DB_NAME = "suzu-excel-db";
+const EXCEL_HANDLE_KEY = "excelFileHandle";
+
+function excelIsSupported() {
+  return typeof window !== "undefined" && "showSaveFilePicker" in window && "indexedDB" in window;
+}
+
+function idbOpen() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(EXCEL_DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      req.result.createObjectStore("handles");
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbGet(key) {
+  try {
+    const db = await idbOpen();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction("handles", "readonly");
+      const req = tx.objectStore("handles").get(key);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    return null;
+  }
+}
+async function idbSet(key, value) {
+  try {
+    const db = await idbOpen();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction("handles", "readwrite");
+      tx.objectStore("handles").put(value, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {
+    /* 保存できなくても致命的ではないので無視 */
+  }
+}
+
+async function chooseExcelFile() {
+  if (!excelIsSupported()) return null;
+  const handle = await window.showSaveFilePicker({
+    suggestedName: "kissa-suzu-data.xlsx",
+    types: [
+      {
+        description: "Excel ワークブック",
+        accept: { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"] },
+      },
+    ],
+  });
+  await idbSet(EXCEL_HANDLE_KEY, handle);
+  return handle;
+}
+
+async function getUsableExcelHandle(requestIfNeeded) {
+  if (!excelIsSupported()) return null;
+  const handle = await idbGet(EXCEL_HANDLE_KEY);
+  if (!handle) return null;
+  try {
+    const opts = { mode: "readwrite" };
+    let perm = await handle.queryPermission(opts);
+    if (perm !== "granted" && requestIfNeeded) {
+      perm = await handle.requestPermission(opts);
+    }
+    return perm === "granted" ? handle : null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeExcelFile(handle, arrayBuffer) {
+  const writable = await handle.createWritable();
+  await writable.write(arrayBuffer);
+  await writable.close();
+}
+
+/* 現在の全データから、シート分けされたExcelワークブックを作成する */
+function buildWorkbookArrayBuffer(state) {
+  const wb = XLSX.utils.book_new();
+
+  const orderRows = [["日時", "卓", "品目", "数量", "単価", "小計", "合計"]];
+  (state.orders || []).forEach((o) => {
+    (o.lines || []).forEach((l, i) => {
+      orderRows.push([
+        i === 0 ? o.label : "",
+        i === 0 ? o.table : "",
+        l.name,
+        l.qty,
+        l.price,
+        l.price * l.qty,
+        i === 0 ? o.total : "",
+      ]);
+    });
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(orderRows), "会計履歴");
+
+  const expRows = [["日付", "勘定科目", "内容", "金額", "領収書番号"]];
+  (state.expenses || []).forEach((e) => expRows.push([e.date, e.cat, e.name, e.amount, e.receiptNo || ""]));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(expRows), "経費");
+
+  const shiftRows = [["日付", "スタッフ", "開始", "終了", "時給"]];
+  Object.entries(state.shiftEntries || {}).forEach(([date, list]) => {
+    (list || []).forEach((e) => {
+      const staffInfo = (state.shiftStaff || []).find((s) => s.name === e.staff);
+      shiftRows.push([date, e.staff, e.start, e.end, staffInfo ? staffInfo.wage : ""]);
+    });
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(shiftRows), "シフト");
+
+  const buyRows = [["カテゴリ", "品目", "基準", "必要数", "購入済み"]];
+  (state.buyLists || []).forEach((cat) => {
+    (cat.items || []).forEach((it) => {
+      const st = (state.buyState || {})[it.id] || { need: 0, bought: false };
+      buyRows.push([cat.cat, it.name, it.stock, st.need, st.bought ? "済" : ""]);
+    });
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(buyRows), "買い出し");
+
+  const menuRows = [["カテゴリ", "品名", "価格区分", "価格", "原価"]];
+  (state.menuItems || []).forEach((m) => {
+    (m.priceOptions || []).forEach((o) => menuRows.push([m.category, m.name, o.short || o.label, o.price, m.cost || ""]));
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(menuRows), "品目");
+
+  return XLSX.write(wb, { type: "array", bookType: "xlsx" });
+}
+
+function downloadWorkbookNow(state) {
+  const buf = buildWorkbookArrayBuffer(state);
+  const blob = new Blob([buf], { type: "application/octet-stream" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "kissa-suzu-data.xlsx";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 function buildWeekStats(orders, monday, menuItems) {
   const sundayEnd = new Date(monday);
   sundayEnd.setDate(sundayEnd.getDate() + 7);
@@ -715,6 +870,12 @@ function PosRegister() {
   const [importMsg, setImportMsg] = useState("");
   const [importMsgType, setImportMsgType] = useState("");
 
+  // ---- Excel自動保存 ----
+  const [excelSupported, setExcelSupported] = useState(false);
+  const [excelEnabled, setExcelEnabled] = useState(false);
+  const [excelMsg, setExcelMsg] = useState("");
+  const excelHandleRef = useRef(null);
+
   const autoCheckedRef = useRef(false);
   const tablesRef = useRef(tables);
   useEffect(() => {
@@ -773,21 +934,21 @@ function PosRegister() {
   // ---- 保存: すべてのデータをひとつのストレージキーにまとめて保存する ----
   const persistAll = useCallback(
     async (patch) => {
+      const payload = {
+        menuItems,
+        orders,
+        tables,
+        reports,
+        storeArea,
+        buyLists,
+        buyState,
+        shiftStaff,
+        shiftEntries,
+        shiftRequests,
+        expenses,
+        ...patch,
+      };
       try {
-        const payload = {
-          menuItems,
-          orders,
-          tables,
-          reports,
-          storeArea,
-          buyLists,
-          buyState,
-          shiftStaff,
-          shiftEntries,
-          shiftRequests,
-          expenses,
-          ...patch,
-        };
         const result = await window.storage.set(STORAGE_KEY, JSON.stringify(payload), true);
         if (!result) throw new Error("no result");
         setSaveError(false);
@@ -795,13 +956,62 @@ function PosRegister() {
         console.error("save failed", e);
         setSaveError(true);
       }
+      // Excel自動保存が有効なら、保存の成否に関わらずベストエフォートで書き出す
+      if (excelEnabled) {
+        (async () => {
+          try {
+            const handle = excelHandleRef.current || (await getUsableExcelHandle(false));
+            if (!handle) return;
+            excelHandleRef.current = handle;
+            const buf = buildWorkbookArrayBuffer(payload);
+            await writeExcelFile(handle, buf);
+          } catch (e) {
+            console.error("excel auto-save failed", e);
+          }
+        })();
+      }
     },
-    [menuItems, orders, tables, reports, storeArea, buyLists, buyState, shiftStaff, shiftEntries, shiftRequests, expenses]
+    [menuItems, orders, tables, reports, storeArea, buyLists, buyState, shiftStaff, shiftEntries, shiftRequests, expenses, excelEnabled]
   );
 
   const showFlash = (msg) => {
     setFlash(msg);
     setTimeout(() => setFlash(""), 1400);
+  };
+
+  useEffect(() => {
+    setExcelSupported(excelIsSupported());
+    (async () => {
+      const handle = await getUsableExcelHandle(false);
+      if (handle) {
+        excelHandleRef.current = handle;
+        setExcelEnabled(true);
+      }
+    })();
+  }, []);
+
+  const handleEnableExcelAutoSave = async () => {
+    try {
+      const handle = await chooseExcelFile();
+      if (!handle) return;
+      excelHandleRef.current = handle;
+      setExcelEnabled(true);
+      setExcelMsg("✅ 自動保存を有効にしました。以後、データが変わるたびにこのファイルへ上書き保存されます。");
+      // 選んだ直後に現在のデータを書き込んでおく
+      const payload = { menuItems, orders, tables, reports, storeArea, buyLists, buyState, shiftStaff, shiftEntries, shiftRequests, expenses };
+      const buf = buildWorkbookArrayBuffer(payload);
+      await writeExcelFile(handle, buf);
+    } catch (e) {
+      if (e && e.name === "AbortError") return; // ユーザーがファイル選択をキャンセルした場合は何もしない
+      console.error("excel enable failed", e);
+      setExcelMsg("自動保存の設定に失敗しました。もう一度お試しください。");
+    }
+  };
+
+  const handleManualExcelDownload = () => {
+    const payload = { menuItems, orders, tables, reports, storeArea, buyLists, buyState, shiftStaff, shiftEntries, shiftRequests, expenses };
+    downloadWorkbookNow(payload);
+    showFlash("Excelファイルをダウンロードしました");
   };
 
   useEffect(() => {
@@ -2419,6 +2629,33 @@ function PosRegister() {
 
         {tab === "menu" && (
           <div className="p-3 space-y-3">
+            <div className="bg-slate-800/60 rounded-lg p-3 border border-dashed border-emerald-700 space-y-2">
+              <div className="text-emerald-300 text-xs font-bold tracking-widest flex items-center gap-1">
+                <Download size={13} /> Excel自動保存
+              </div>
+              <div className="text-[11px] text-slate-400 leading-relaxed">
+                {excelSupported
+                  ? "パソコン上のExcelファイルを1つ選ぶと、以後データが変わるたびに自動でそのファイルへ上書き保存されます（会計履歴・経費・シフト・買い出し・品目のシートに分かれます）。対応: Chrome / Edge のパソコン版。"
+                  : "このブラウザ（またはスマートフォン）は自動保存に対応していません。下の「今すぐダウンロード」で手動保存してください。"}
+              </div>
+              {excelSupported && (
+                <button
+                  onClick={handleEnableExcelAutoSave}
+                  className={"w-full rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-1.5 " + (excelEnabled ? "bg-emerald-800 text-emerald-100" : "bg-emerald-700 text-white")}
+                >
+                  <Check size={14} />
+                  {excelEnabled ? "自動保存 有効中（別のファイルに変更する）" : "Excelファイルを選んで自動保存を有効にする"}
+                </button>
+              )}
+              <button
+                onClick={handleManualExcelDownload}
+                className="w-full bg-slate-700 text-stone-100 rounded-lg py-2 text-xs font-bold flex items-center justify-center gap-1.5"
+              >
+                <Download size={13} /> 今すぐExcelをダウンロードする
+              </button>
+              {excelMsg && <div className="text-[11px] text-emerald-300">{excelMsg}</div>}
+            </div>
+
             <div className="bg-slate-800/60 rounded-lg p-3 border border-dashed border-teal-700 space-y-2">
               <div className="text-teal-300 text-xs font-bold tracking-widest flex items-center gap-1">
                 <Upload size={13} /> 旧システムからのデータ移行（一括インポート）
@@ -2823,20 +3060,19 @@ ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(
 <script>
   function suzuBoot(attempt) {
     attempt = attempt || 0;
-    if (typeof Babel === 'undefined' || typeof React === 'undefined' || typeof ReactDOM === 'undefined') {
-      // CDNの読み込みが（フォールバック経由なども含めて）まだ終わっていない可能性があるため、
-      // 最大3秒ほど少し待ってからリトライする（白紙のまま固まるのを防ぐ）
+    if (typeof Babel === 'undefined' || typeof React === 'undefined' || typeof ReactDOM === 'undefined' || typeof XLSX === 'undefined') {
       if (attempt < 15) {
         setTimeout(function() { suzuBoot(attempt + 1); }, 200);
         return;
       }
       var el = document.getElementById('boot-error');
       el.style.display = 'block';
-      el.textContent = 'CDNからのライブラリ読み込みに失敗しました（React/ReactDOM/Babelのいずれか）。\n'
+      el.textContent = 'CDNからのライブラリ読み込みに失敗しました（React/ReactDOM/Babel/XLSXのいずれか）。\n'
         + 'ネットワークの広告ブロッカーやセキュリティソフトが jsdelivr.net / unpkg.com への通信をブロックしていないか確認してください。\n'
         + 'React defined: ' + (typeof React !== 'undefined')
         + ' / ReactDOM defined: ' + (typeof ReactDOM !== 'undefined')
-        + ' / Babel defined: ' + (typeof Babel !== 'undefined');
+        + ' / Babel defined: ' + (typeof Babel !== 'undefined')
+        + ' / XLSX defined: ' + (typeof XLSX !== 'undefined');
       return;
     }
     try {
