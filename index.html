@@ -6,8 +6,6 @@
 <title>喫茶すず〜 ハンディレジ</title>
 <script src="https://cdn.tailwindcss.com"></script>
 
-<!-- jsDelivrをメインCDNに使用（unpkgより多くの環境で安定して読み込めるため）。
-     万一jsDelivrが読み込めない環境向けに、onerrorでunpkgへ自動フォールバックします。 -->
 <script crossorigin src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"
   onerror="this.onerror=null;var s=document.createElement('script');s.src='https://unpkg.com/react@18/umd/react.production.min.js';s.crossOrigin='anonymous';document.head.appendChild(s);"></script>
 <script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"
@@ -93,16 +91,17 @@ window.storage = {
   list: async () => ({ keys: [] }),
 };
 
-/* 他の端末がデータを更新したら検知して自動でページを再読込します。
-   ※ 入力途中の未確定な下書き（例：買い出しの品名欄など）は失われる場合が
-   ありますが、確定済みの注文・経費・シフトなどは全て保存済みなので消えません。
-
-   ★ 修正: 固定間隔のポーリングだけだと「タブを切り替えて戻ってきた直後」
-   などに最大でポーリング間隔ぶんの時間差が生じていました。
-   間隔を短縮した上で、タブが再表示された瞬間・ウィンドウにフォーカスが
-   戻った瞬間にも即座にチェックするようにし、体感の時間差を解消します。 */
+/* 他の端末がデータを更新したら検知して、アプリ側にお知らせします。
+   ★ 修正: 以前は window.location.reload() でページ全体を強制的に
+   再読み込みしていたため、入力途中の画面がその瞬間に消えたり、
+   タブが初期画面（レジタブ）に戻されたりする不具合がありました。
+   今回からは「ページの再読み込み」は一切行わず、カスタムイベント
+   'suzu-cloud-updated' を発火するだけにし、アプリ本体（PosRegister.jsx）
+   側でデータだけをその場で静かに取り直す方式に変更しました。
+   入力中の下書き（例：経費フォームの入力中の内容など）には触れないため、
+   タイピング中に文字が消えることもありません。 */
 const SUZU_STORAGE_KEY = "kissa-suzu-pos-store";
-const SUZU_POLL_INTERVAL_MS = 6000; // 20秒 → 6秒に短縮
+const SUZU_POLL_INTERVAL_MS = 6000;
 let _suzuPollInFlight = false;
 
 async function suzuCheckForUpdate() {
@@ -111,7 +110,8 @@ async function suzuCheckForUpdate() {
   try {
     const row = await sbFetchRow(SUZU_STORAGE_KEY);
     if (row && _lastKnownUpdatedAt && row.updated_at !== _lastKnownUpdatedAt) {
-      window.location.reload();
+      _lastKnownUpdatedAt = row.updated_at; // 先に更新し、同じ変更で何度も発火しないようにする
+      window.dispatchEvent(new CustomEvent("suzu-cloud-updated"));
     }
   } catch (e) {
     /* 通信エラーは無視して次回ポーリングでリトライ */
@@ -130,10 +130,8 @@ window.addEventListener("focus", suzuCheckForUpdate);
 
 </script>
 
-<!-- JSXソースはテキストとしてそのまま保持し、下のスクリプトで明示的な
-     オプション（runtime: "classic"）を指定してBabelに変換させます。 -->
 <script id="app-source" type="text/plain">
-const { useState, useEffect, useCallback, useRef } = React;
+const { useState, useEffect, useCallback, useRef, useMemo } = React;
 
 /* ============================================================
    lucide-react の代替アイコン（外部依存なし・インラインSVG）
@@ -834,7 +832,6 @@ function PosRegister() {
   const [modalDrinkTemp, setModalDrinkTemp] = useState(null);
   const [modalTopping, setModalTopping] = useState("none");
   const [editingItem, setEditingItem] = useState(null);
-  const [newItem, setNewItem] = useState({ name: "", price: "", cost: "", category: "追加" });
   const [analyzingWeek, setAnalyzingWeek] = useState(null);
   const [analysisError, setAnalysisError] = useState("");
   const [storeArea, setStoreArea] = useState("");
@@ -843,7 +840,6 @@ function PosRegister() {
   // ---- 買い出しリスト ----
   const [buyLists, setBuyLists] = useState(DEFAULT_BUY_LIST);
   const [buyState, setBuyState] = useState({}); // { id: { need, bought } }
-  const [newBuyItem, setNewBuyItem] = useState({ name: "", cat: DEFAULT_BUY_LIST[0].cat, stock: "" });
   const [buySendOpen, setBuySendOpen] = useState(false);
 
   // ---- シフト管理 ----
@@ -861,7 +857,6 @@ function PosRegister() {
 
   // ---- 経費・確定申告 ----
   const [expenses, setExpenses] = useState([]); // [{id,date,cat,name,amount,receiptNo}]
-  const [expDraft, setExpDraft] = useState({ date: "", cat: "", name: "", amount: "", receiptNo: "" });
   const [expYearFilter, setExpYearFilter] = useState("");
   const [taxYear, setTaxYear] = useState("");
 
@@ -884,26 +879,31 @@ function PosRegister() {
   const cartBarRef = useRef(null);
   const [cartBarHeight, setCartBarHeight] = useState(0);
 
+  // クラウドから取得したデータを各Stateに反映する（初回読み込み・他端末からの
+  // 更新検知の両方から呼び出す共通処理。draft系のstate（入力途中の下書き）には
+  // 一切触れないため、入力中に画面が乱れることはない）
+  const applyCloudPayload = useCallback((parsed) => {
+    if (parsed.menuItems && parsed.menuItems.length) setMenuItems(parsed.menuItems);
+    if (parsed.orders) setOrders(parsed.orders);
+    if (parsed.tables) setTables({ ...emptyTables(), ...parsed.tables });
+    if (parsed.reports) setReports(parsed.reports);
+    if (parsed.storeArea) setStoreArea(parsed.storeArea);
+    if (parsed.buyLists && parsed.buyLists.length) setBuyLists(parsed.buyLists);
+    if (parsed.buyState) setBuyState(parsed.buyState);
+    if (parsed.shiftStaff) setShiftStaff(parsed.shiftStaff);
+    if (parsed.shiftEntries) setShiftEntries(parsed.shiftEntries);
+    if (parsed.shiftRequests) setShiftRequests(parsed.shiftRequests);
+    if (parsed.expenses) setExpenses(parsed.expenses);
+  }, []);
+
   useEffect(() => {
     (async () => {
       try {
         const res = await window.storage.get(STORAGE_KEY, true);
         if (res && res.value) {
           const parsed = JSON.parse(res.value);
-          if (parsed.menuItems && parsed.menuItems.length) setMenuItems(parsed.menuItems);
-          if (parsed.orders) setOrders(parsed.orders);
-          if (parsed.tables) setTables({ ...emptyTables(), ...parsed.tables });
-          if (parsed.reports) setReports(parsed.reports);
-          if (parsed.storeArea) {
-            setStoreArea(parsed.storeArea);
-            setStoreAreaDraft(parsed.storeArea);
-          }
-          if (parsed.buyLists && parsed.buyLists.length) setBuyLists(parsed.buyLists);
-          if (parsed.buyState) setBuyState(parsed.buyState);
-          if (parsed.shiftStaff) setShiftStaff(parsed.shiftStaff);
-          if (parsed.shiftEntries) setShiftEntries(parsed.shiftEntries);
-          if (parsed.shiftRequests) setShiftRequests(parsed.shiftRequests);
-          if (parsed.expenses) setExpenses(parsed.expenses);
+          applyCloudPayload(parsed);
+          if (parsed.storeArea) setStoreAreaDraft(parsed.storeArea);
         } else {
           await window.storage.set(
             STORAGE_KEY,
@@ -929,7 +929,24 @@ function PosRegister() {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [applyCloudPayload]);
+
+  // ★ 修正: 他端末の更新は「ページ全体の強制リロード」ではなく、データだけを
+  // その場で静かに取り直す方式に変更。これにより入力中の画面が消えたり
+  // 初期タブに戻されたりすることがなくなる（storage-polyfill.js が
+  // window 'suzu-cloud-updated' イベントを発火する）
+  useEffect(() => {
+    const handler = async () => {
+      try {
+        const res = await window.storage.get(STORAGE_KEY, true);
+        if (res && res.value) applyCloudPayload(JSON.parse(res.value));
+      } catch (e) {
+        console.error("soft refresh failed", e);
+      }
+    };
+    window.addEventListener("suzu-cloud-updated", handler);
+    return () => window.removeEventListener("suzu-cloud-updated", handler);
+  }, [applyCloudPayload]);
 
   // ---- 保存: すべてのデータをひとつのストレージキーにまとめて保存する ----
   const persistAll = useCallback(
@@ -1215,23 +1232,23 @@ function PosRegister() {
     await persistAll({ menuItems: next });
   };
 
-  const addMenuItem = async () => {
-    const price = parseInt(newItem.price, 10);
-    if (!newItem.name.trim() || !price || price <= 0) {
+  const addMenuItem = async ({ name, price: priceStr, cost: costStr, category }) => {
+    const price = parseInt(priceStr, 10);
+    if (!name.trim() || !price || price <= 0) {
       showFlash("品名と価格を入力してください");
-      return;
+      return false;
     }
-    const cost = parseInt(newItem.cost, 10);
+    const cost = parseInt(costStr, 10);
     const item = {
       id: "i" + Date.now(),
-      category: newItem.category || "追加",
-      name: newItem.name.trim(),
+      category: category || "追加",
+      name: name.trim(),
       priceOptions: [{ label: "単品", price }],
       cost: cost > 0 ? cost : undefined,
     };
     await saveMenu([...menuItems, item]);
-    setNewItem({ name: "", price: "", cost: "", category: "追加" });
     showFlash("品目を追加しました");
+    return true;
   };
 
   const updateItemName = (id, name) => {
@@ -1330,11 +1347,15 @@ function PosRegister() {
     }
   };
 
-  const grouped = CATEGORY_ORDER.map((cat) => ({ cat, items: menuItems.filter((m) => m.category === cat) })).filter(
-    (g) => g.items.length > 0
+  const grouped = useMemo(
+    () =>
+      CATEGORY_ORDER.map((cat) => ({ cat, items: menuItems.filter((m) => m.category === cat) })).filter(
+        (g) => g.items.length > 0
+      ),
+    [menuItems]
   );
 
-  const dailyStats = buildDailyStats(orders, 14);
+  const dailyStats = useMemo(() => buildDailyStats(orders, 14), [orders]);
   const currentMonday = getMonday(new Date());
   const prevMonday = new Date(currentMonday);
   prevMonday.setDate(prevMonday.getDate() - 7);
@@ -1357,19 +1378,16 @@ function PosRegister() {
     const cur = getBuyItem(id);
     setBuyItem(id, { bought: !cur.bought, need: !cur.bought ? 0 : cur.need });
   };
-  const addCustomBuyItem = async () => {
-    if (!newBuyItem.name.trim()) {
+  const addCustomBuyItem = async ({ name, cat, stock }) => {
+    if (!name.trim()) {
       showFlash("品名を入力してください");
       return;
     }
     const id = genId("bc");
-    const nextLists = buyLists.map((cat) =>
-      cat.cat === newBuyItem.cat
-        ? { ...cat, items: [...cat.items, { id, name: newBuyItem.name.trim(), stock: newBuyItem.stock.trim() || "都度確認" }] }
-        : cat
+    const nextLists = buyLists.map((c) =>
+      c.cat === cat ? { ...c, items: [...c.items, { id, name: name.trim(), stock: stock.trim() || "都度確認" }] } : c
     );
     setBuyLists(nextLists);
-    setNewBuyItem({ name: "", cat: newBuyItem.cat, stock: "" });
     await persistAll({ buyLists: nextLists });
     showFlash("買い出し品目を追加しました");
   };
@@ -1409,9 +1427,17 @@ function PosRegister() {
     lines.push("以上よろしくお願いします🙏");
     return lines.join("\n");
   };
-  const buyNeedCount = buyLists.flatMap((c) => c.items).filter((i) => getBuyItem(i.id).need > 0 && !getBuyItem(i.id).bought).length;
-  const buyBoughtCount = buyLists.flatMap((c) => c.items).filter((i) => getBuyItem(i.id).bought).length;
-  const buyTotalCount = buyLists.flatMap((c) => c.items).length;
+  const { buyNeedCount, buyBoughtCount, buyTotalCount } = useMemo(() => {
+    const allItems = buyLists.flatMap((c) => c.items);
+    let need = 0;
+    let bought = 0;
+    allItems.forEach((i) => {
+      const st = buyState[i.id] || { need: 0, bought: false };
+      if (st.need > 0 && !st.bought) need++;
+      if (st.bought) bought++;
+    });
+    return { buyNeedCount: need, buyBoughtCount: bought, buyTotalCount: allItems.length };
+  }, [buyLists, buyState]);
   const sendBuyListToLine = () => {
     const text = buildBuyText();
     if (!text) {
@@ -1570,56 +1596,65 @@ function PosRegister() {
     for (let m = 0; m < 12; m++) sum += monthlyLaborCost(y, m);
     return sum;
   };
-  const getDaySales = (y, m, d) => {
-    const target = `${y}/${m + 1}/${d}`; // toLocaleDateString ja-JP format for order dateKey uses 2-digit; use timeLabel comparisons instead
-    return orders
-      .filter((o) => {
-        const od = new Date(o.time);
-        return od.getFullYear() === y && od.getMonth() === m && od.getDate() === d;
-      })
-      .reduce((s, o) => s + o.total, 0);
-  };
+  // ★ 高負荷対策: 表示中の月の給与明細は、シフト・スタッフ情報が変わった時だけ再計算する
+  const currentMonthPayroll = useMemo(
+    () => calcMonthlyPayroll(shiftViewYM.y, shiftViewYM.m),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [shiftViewYM.y, shiftViewYM.m, shiftEntries, shiftStaff]
+  );
+  // ★ 高負荷対策: 日別売上マップを注文データが変わった時だけ1回だけ作成し、
+  // 各日の合計はO(1)で参照する（以前は呼び出しごとに全注文をスキャンしていた）
+  const daySalesMap = useMemo(() => {
+    const map = {};
+    orders.forEach((o) => {
+      const od = new Date(o.time);
+      const key = `${od.getFullYear()}-${od.getMonth()}-${od.getDate()}`;
+      map[key] = (map[key] || 0) + o.total;
+    });
+    return map;
+  }, [orders]);
+  const getDaySales = (y, m, d) => daySalesMap[`${y}-${m}-${d}`] || 0;
 
   /* ============================================================
      ★ 経費・確定申告 ロジック
      ============================================================ */
-  const addExpense = async () => {
-    const amount = parseInt(expDraft.amount, 10);
-    if (!expDraft.date) {
+  const addExpense = async (draft) => {
+    const amount = parseInt(draft.amount, 10);
+    if (!draft.date) {
       showFlash("支出日を入力してください");
-      return;
+      return false;
     }
-    if (!expDraft.cat) {
+    if (!draft.cat) {
       showFlash("カテゴリを選択してください");
-      return;
+      return false;
     }
-    if (!expDraft.name.trim()) {
+    if (!draft.name.trim()) {
       showFlash("内容を入力してください");
-      return;
+      return false;
     }
     if (!amount || amount <= 0) {
       showFlash("金額を正しく入力してください");
-      return;
+      return false;
     }
-    const exp = { id: genId("e"), date: expDraft.date, cat: expDraft.cat, name: expDraft.name.trim(), amount, receiptNo: expDraft.receiptNo.trim() };
+    const exp = { id: genId("e"), date: draft.date, cat: draft.cat, name: draft.name.trim(), amount, receiptNo: draft.receiptNo.trim() };
     const next = [...expenses, exp];
     setExpenses(next);
-    setExpDraft({ date: expDraft.date, cat: "", name: "", amount: "", receiptNo: "" });
     await persistAll({ expenses: next });
     showFlash(`経費を登録しました（${yen(amount)}）`);
+    return true;
   };
   const deleteExpense = async (id) => {
     const next = expenses.filter((e) => e.id !== id);
     setExpenses(next);
     await persistAll({ expenses: next });
   };
-  const applyQuickExpense = (q) => {
-    setExpDraft((d) => ({ ...d, cat: q.cat, name: q.name }));
-  };
-  const expenseYears = [...new Set(expenses.map((e) => e.date.slice(0, 4)))].sort().reverse();
+  const expenseYears = useMemo(() => [...new Set(expenses.map((e) => e.date.slice(0, 4)))].sort().reverse(), [expenses]);
   const activeExpYear = expenseYears.includes(expYearFilter) ? expYearFilter : expenseYears[0] || String(new Date().getFullYear());
   const activeTaxYear = expenseYears.includes(taxYear) ? taxYear : expenseYears[0] || String(new Date().getFullYear());
-  const yearExpenses = expenses.filter((e) => e.date.startsWith(activeExpYear)).sort((a, b) => b.date.localeCompare(a.date));
+  const yearExpenses = useMemo(
+    () => expenses.filter((e) => e.date.startsWith(activeExpYear)).sort((a, b) => b.date.localeCompare(a.date)),
+    [expenses, activeExpYear]
+  );
 
   const buildTaxSummary = (year) => {
     const yearReceiptsTotal = orders
@@ -1635,6 +1670,13 @@ function PosRegister() {
     const profit = yearReceiptsTotal - expenseTotal;
     return { sales: yearReceiptsTotal, catTotals, laborCost, expenseTotal, profit };
   };
+
+  // ★ 高負荷な集計処理のため、関係するデータが変わった時だけ再計算する
+  const taxSummary = useMemo(
+    () => buildTaxSummary(activeTaxYear),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeTaxYear, orders, expenses, shiftEntries, shiftStaff]
+  );
 
   const copyTaxReturnText = async (year) => {
     const s = buildTaxSummary(year);
@@ -2049,37 +2091,7 @@ function PosRegister() {
               </div>
             ))}
 
-            <div className="bg-slate-800/60 rounded-lg p-3 border border-dashed border-slate-600 space-y-2">
-              <div className="text-xs text-slate-400 flex items-center gap-1">
-                <Plus size={12} /> 品目を追加
-              </div>
-              <input
-                placeholder="品名"
-                className="w-full bg-slate-900 rounded px-2 py-1.5 text-sm border border-slate-700"
-                value={newBuyItem.name}
-                onChange={(e) => setNewBuyItem((n) => ({ ...n, name: e.target.value }))}
-              />
-              <input
-                placeholder="基準（例: 3ストック）"
-                className="w-full bg-slate-900 rounded px-2 py-1.5 text-sm border border-slate-700"
-                value={newBuyItem.stock}
-                onChange={(e) => setNewBuyItem((n) => ({ ...n, stock: e.target.value }))}
-              />
-              <select
-                className="w-full bg-slate-900 rounded px-2 py-1.5 text-sm border border-slate-700"
-                value={newBuyItem.cat}
-                onChange={(e) => setNewBuyItem((n) => ({ ...n, cat: e.target.value }))}
-              >
-                {buyLists.map((c) => (
-                  <option key={c.cat} value={c.cat}>
-                    {c.cat}
-                  </option>
-                ))}
-              </select>
-              <button onClick={addCustomBuyItem} className="w-full bg-amber-500 text-slate-900 rounded-lg py-2 text-sm font-bold">
-                追加する
-              </button>
-            </div>
+            <AddBuyItemForm buyLists={buyLists} onAdd={addCustomBuyItem} />
 
             <button
               onClick={sendBuyListToLine}
@@ -2243,7 +2255,7 @@ function PosRegister() {
             <div>
               <div className="text-amber-400 text-xs font-bold tracking-widest mb-1.5">月次給与明細（自動計算）</div>
               {(() => {
-                const payroll = calcMonthlyPayroll(shiftViewYM.y, shiftViewYM.m);
+                const payroll = currentMonthPayroll;
                 const names = Object.keys(payroll).sort();
                 const total = names.reduce((s, n) => s + payroll[n].pay, 0);
                 if (names.length === 0)
@@ -2341,63 +2353,7 @@ function PosRegister() {
         ============================================================ */}
         {tab === "expense" && (
           <div className="p-3 space-y-4">
-            <div>
-              <div className="text-amber-400 text-xs font-bold tracking-widest mb-1.5">よく使う経費（タップで自動入力）</div>
-              <div className="flex flex-wrap gap-2">
-                {QUICK_EXPENSES.map((q) => (
-                  <button key={q.label} onClick={() => applyQuickExpense(q)} className="bg-amber-400/10 border border-amber-500/40 text-amber-300 rounded-full px-3 py-1.5 text-xs font-bold">
-                    {q.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="bg-slate-800 rounded-lg border border-slate-700 p-3 space-y-2">
-              <div className="text-xs text-slate-400">支出日</div>
-              <input
-                type="date"
-                className="w-full bg-slate-900 rounded px-2 py-1.5 text-sm border border-slate-700"
-                value={expDraft.date}
-                onChange={(e) => setExpDraft((d) => ({ ...d, date: e.target.value }))}
-              />
-              <div className="text-xs text-slate-400 pt-1">カテゴリ（勘定科目）</div>
-              <div className="flex flex-wrap gap-1.5">
-                {EXPENSE_CATEGORIES.map((c) => (
-                  <button
-                    key={c}
-                    onClick={() => setExpDraft((d) => ({ ...d, cat: c }))}
-                    className={"px-2.5 py-1.5 rounded-lg text-xs font-bold border " + (expDraft.cat === c ? "bg-amber-400 text-slate-900 border-amber-500" : "bg-slate-900 border-slate-700 text-slate-300")}
-                  >
-                    {c}
-                  </button>
-                ))}
-              </div>
-              <div className="text-xs text-slate-400 pt-1">内容・摘要</div>
-              <input
-                placeholder="例：業務スーパー　食材仕入れ"
-                className="w-full bg-slate-900 rounded px-2 py-1.5 text-sm border border-slate-700"
-                value={expDraft.name}
-                onChange={(e) => setExpDraft((d) => ({ ...d, name: e.target.value }))}
-              />
-              <div className="text-xs text-slate-400 pt-1">金額（税込）</div>
-              <input
-                type="number"
-                placeholder="例：5800"
-                className="w-full bg-slate-900 rounded px-2 py-1.5 text-sm border border-slate-700"
-                value={expDraft.amount}
-                onChange={(e) => setExpDraft((d) => ({ ...d, amount: e.target.value }))}
-              />
-              <div className="text-xs text-slate-400 pt-1">領収書番号（任意）</div>
-              <input
-                placeholder="例：R-20240601-001"
-                className="w-full bg-slate-900 rounded px-2 py-1.5 text-sm border border-slate-700"
-                value={expDraft.receiptNo}
-                onChange={(e) => setExpDraft((d) => ({ ...d, receiptNo: e.target.value }))}
-              />
-              <button onClick={addExpense} className="w-full bg-amber-500 text-slate-900 rounded-lg py-2.5 text-sm font-bold mt-1">
-                経費を登録する
-              </button>
-            </div>
+            <ExpenseForm onSubmit={addExpense} />
 
             <div>
               <div className="flex items-center justify-between mb-1.5">
@@ -2450,7 +2406,7 @@ function PosRegister() {
                 </div>
               </div>
               {(() => {
-                const s = buildTaxSummary(activeTaxYear);
+                const s = taxSummary;
                 return (
                   <div className="bg-slate-900 rounded-lg border border-slate-700 p-3 text-sm space-y-1.5">
                     <div className="flex justify-between text-teal-300"><span>売上高（税込）</span><span className="font-bold">{yen(s.sales)}</span></div>
@@ -2755,43 +2711,7 @@ function PosRegister() {
               </div>
             ))}
 
-            <div className="bg-slate-800/60 rounded-lg p-3 border border-dashed border-slate-600 space-y-2">
-              <div className="text-xs text-slate-400 flex items-center gap-1">
-                <Plus size={12} /> 新しい品目を追加（単品のみ）
-              </div>
-              <input
-                placeholder="品名"
-                className="w-full bg-slate-900 rounded px-2 py-1.5 text-sm border border-slate-700"
-                value={newItem.name}
-                onChange={(e) => setNewItem((n) => ({ ...n, name: e.target.value }))}
-              />
-              <input
-                placeholder="価格"
-                type="number"
-                className="w-full bg-slate-900 rounded px-2 py-1.5 text-sm border border-slate-700"
-                value={newItem.price}
-                onChange={(e) => setNewItem((n) => ({ ...n, price: e.target.value }))}
-              />
-              <input
-                placeholder="原価（任意・収益性分析に使用）"
-                type="number"
-                className="w-full bg-slate-900 rounded px-2 py-1.5 text-sm border border-slate-700"
-                value={newItem.cost}
-                onChange={(e) => setNewItem((n) => ({ ...n, cost: e.target.value }))}
-              />
-              <select
-                className="w-full bg-slate-900 rounded px-2 py-1.5 text-sm border border-slate-700"
-                value={newItem.category}
-                onChange={(e) => setNewItem((n) => ({ ...n, category: e.target.value }))}
-              >
-                {CATEGORY_ORDER.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-              <button onClick={addMenuItem} className="w-full bg-amber-500 text-slate-900 rounded-lg py-2 text-sm font-bold">
-                追加する
-              </button>
-            </div>
+            <MenuAddItemForm onAdd={addMenuItem} />
           </div>
         )}
       </main>
@@ -3053,6 +2973,194 @@ function ShiftAddForm({ staffList, shiftAddMode, setShiftAddMode, onAdd, dow, mo
     </div>
   );
 }
+/* ============================================================
+   入力ラグ対策: 以下のフォームは自分自身のローカルstateだけを持ち、
+   親コンポーネント(PosRegister)のstateには一切触れません。
+   これにより、これらのフォームで1文字入力するたびに巨大な親コンポー
+   ネント全体が再描画される問題を避け、タイピングが軽くなります。
+   ============================================================ */
+
+function AddBuyItemForm({ buyLists, onAdd }) {
+  const [name, setName] = useState("");
+  const [stock, setStock] = useState("");
+  const [cat, setCat] = useState(buyLists[0]?.cat || "");
+
+  const submit = async () => {
+    const ok = await onAdd({ name, cat, stock });
+    if (ok !== false) {
+      setName("");
+      setStock("");
+    }
+  };
+
+  return (
+    <div className="bg-slate-800/60 rounded-lg p-3 border border-dashed border-slate-600 space-y-2">
+      <div className="text-xs text-slate-400 flex items-center gap-1">
+        <Plus size={12} /> 品目を追加
+      </div>
+      <input
+        placeholder="品名"
+        className="w-full bg-slate-900 rounded px-2 py-1.5 text-sm border border-slate-700"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+      />
+      <input
+        placeholder="基準（例: 3ストック）"
+        className="w-full bg-slate-900 rounded px-2 py-1.5 text-sm border border-slate-700"
+        value={stock}
+        onChange={(e) => setStock(e.target.value)}
+      />
+      <select className="w-full bg-slate-900 rounded px-2 py-1.5 text-sm border border-slate-700" value={cat} onChange={(e) => setCat(e.target.value)}>
+        {buyLists.map((c) => (
+          <option key={c.cat} value={c.cat}>
+            {c.cat}
+          </option>
+        ))}
+      </select>
+      <button onClick={submit} className="w-full bg-amber-500 text-slate-900 rounded-lg py-2 text-sm font-bold">
+        追加する
+      </button>
+    </div>
+  );
+}
+
+function ExpenseForm({ onSubmit }) {
+  const todayStr = () => {
+    const d = new Date();
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  };
+  const [date, setDate] = useState(todayStr());
+  const [cat, setCat] = useState("");
+  const [name, setName] = useState("");
+  const [amount, setAmount] = useState("");
+  const [receiptNo, setReceiptNo] = useState("");
+
+  const applyQuick = (q) => {
+    setCat(q.cat);
+    setName(q.name);
+  };
+
+  const submit = async () => {
+    const ok = await onSubmit({ date, cat, name, amount, receiptNo });
+    if (ok) {
+      setCat("");
+      setName("");
+      setAmount("");
+      setReceiptNo("");
+    }
+  };
+
+  return (
+    <>
+      <div>
+        <div className="text-amber-400 text-xs font-bold tracking-widest mb-1.5">よく使う経費（タップで自動入力）</div>
+        <div className="flex flex-wrap gap-2">
+          {QUICK_EXPENSES.map((q) => (
+            <button key={q.label} onClick={() => applyQuick(q)} className="bg-amber-400/10 border border-amber-500/40 text-amber-300 rounded-full px-3 py-1.5 text-xs font-bold">
+              {q.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="bg-slate-800 rounded-lg border border-slate-700 p-3 space-y-2">
+        <div className="text-xs text-slate-400">支出日</div>
+        <input type="date" className="w-full bg-slate-900 rounded px-2 py-1.5 text-sm border border-slate-700" value={date} onChange={(e) => setDate(e.target.value)} />
+        <div className="text-xs text-slate-400 pt-1">カテゴリ（勘定科目）</div>
+        <div className="flex flex-wrap gap-1.5">
+          {EXPENSE_CATEGORIES.map((c) => (
+            <button
+              key={c}
+              onClick={() => setCat(c)}
+              className={"px-2.5 py-1.5 rounded-lg text-xs font-bold border " + (cat === c ? "bg-amber-400 text-slate-900 border-amber-500" : "bg-slate-900 border-slate-700 text-slate-300")}
+            >
+              {c}
+            </button>
+          ))}
+        </div>
+        <div className="text-xs text-slate-400 pt-1">内容・摘要</div>
+        <input
+          placeholder="例：業務スーパー　食材仕入れ"
+          className="w-full bg-slate-900 rounded px-2 py-1.5 text-sm border border-slate-700"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <div className="text-xs text-slate-400 pt-1">金額（税込）</div>
+        <input
+          type="number"
+          placeholder="例：5800"
+          className="w-full bg-slate-900 rounded px-2 py-1.5 text-sm border border-slate-700"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+        />
+        <div className="text-xs text-slate-400 pt-1">領収書番号（任意）</div>
+        <input
+          placeholder="例：R-20240601-001"
+          className="w-full bg-slate-900 rounded px-2 py-1.5 text-sm border border-slate-700"
+          value={receiptNo}
+          onChange={(e) => setReceiptNo(e.target.value)}
+        />
+        <button onClick={submit} className="w-full bg-amber-500 text-slate-900 rounded-lg py-2.5 text-sm font-bold mt-1">
+          経費を登録する
+        </button>
+      </div>
+    </>
+  );
+}
+
+function MenuAddItemForm({ onAdd }) {
+  const [name, setName] = useState("");
+  const [price, setPrice] = useState("");
+  const [cost, setCost] = useState("");
+  const [category, setCategory] = useState(CATEGORY_ORDER[CATEGORY_ORDER.length - 1]);
+
+  const submit = async () => {
+    const ok = await onAdd({ name, price, cost, category });
+    if (ok !== false) {
+      setName("");
+      setPrice("");
+      setCost("");
+    }
+  };
+
+  return (
+    <div className="bg-slate-800/60 rounded-lg p-3 border border-dashed border-slate-600 space-y-2">
+      <div className="text-xs text-slate-400 flex items-center gap-1">
+        <Plus size={12} /> 新しい品目を追加（単品のみ）
+      </div>
+      <input
+        placeholder="品名"
+        className="w-full bg-slate-900 rounded px-2 py-1.5 text-sm border border-slate-700"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+      />
+      <input
+        placeholder="価格"
+        type="number"
+        className="w-full bg-slate-900 rounded px-2 py-1.5 text-sm border border-slate-700"
+        value={price}
+        onChange={(e) => setPrice(e.target.value)}
+      />
+      <input
+        placeholder="原価（任意・収益性分析に使用）"
+        type="number"
+        className="w-full bg-slate-900 rounded px-2 py-1.5 text-sm border border-slate-700"
+        value={cost}
+        onChange={(e) => setCost(e.target.value)}
+      />
+      <select className="w-full bg-slate-900 rounded px-2 py-1.5 text-sm border border-slate-700" value={category} onChange={(e) => setCategory(e.target.value)}>
+        {CATEGORY_ORDER.map((c) => (
+          <option key={c} value={c}>
+            {c}
+          </option>
+        ))}
+      </select>
+      <button onClick={submit} className="w-full bg-amber-500 text-slate-900 rounded-lg py-2 text-sm font-bold">
+        追加する
+      </button>
+    </div>
+  );
+}
 
 ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(PosRegister));
 </script>
@@ -3068,7 +3176,6 @@ ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(
       var el = document.getElementById('boot-error');
       el.style.display = 'block';
       el.textContent = 'CDNからのライブラリ読み込みに失敗しました（React/ReactDOM/Babel/XLSXのいずれか）。\n'
-        + 'ネットワークの広告ブロッカーやセキュリティソフトが jsdelivr.net / unpkg.com への通信をブロックしていないか確認してください。\n'
         + 'React defined: ' + (typeof React !== 'undefined')
         + ' / ReactDOM defined: ' + (typeof ReactDOM !== 'undefined')
         + ' / Babel defined: ' + (typeof Babel !== 'undefined')
