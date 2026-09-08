@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ReelCraft AI | 動画からバズるリールをAIが自動生成</title>
+<meta name="description" content="お店の動画をアップロードするだけ。AIが料理・外観・店内・スタッフの良い瞬間を自動検出し、字幕・商品情報・BGMカットまで自動編集。Instagram・TikTok・Shorts向けに最適化したリールを複数パターン自動生成します。">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎬</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --bg: #08090f;
+    --bg-soft: #0d0f1a;
+    --panel: #12141f;
+    --panel-border: rgba(255,255,255,0.08);
+    --text: #f3f4f8;
+    --text-dim: #9498ab;
+    --accent1: #ff4d8d;
+    --accent2: #7c5cff;
+    --accent3: #35d4c7;
+    --grad: linear-gradient(135deg, var(--accent1), var(--accent2) 55%, var(--accent3));
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:"Noto Sans JP", "Hiragino Sans", sans-serif;
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+  h1,h2,h3, .headline-font{ font-family:"Space Grotesk","Noto Sans JP",sans-serif; letter-spacing:-0.01em; }
+  a{color:inherit; text-decoration:none;}
+  img,svg{display:block;}
+  .wrap{ max-width:1180px; margin:0 auto; padding:0 24px; }
+  .grad-text{
+    background:var(--grad); -webkit-background-clip:text; background-clip:text; color:transparent;
+  }
+  .btn{
+    display:inline-flex; align-items:center; justify-content:center; gap:8px;
+    padding:14px 28px; border-radius:999px; font-weight:700; font-size:15px;
+    cursor:pointer; border:1px solid transparent; transition:transform .15s ease, box-shadow .15s ease, opacity .15s ease;
+    white-space:nowrap;
+  }
+  .btn:active{ transform:scale(.97); }
+  .btn-primary{ background:var(--grad); color:#08090f; box-shadow:0 8px 30px -8px rgba(124,92,255,.6); }
+  .btn-primary:hover{ box-shadow:0 12px 34px -6px rgba(124,92,255,.75); }
+  .btn-ghost{ background:rgba(255,255,255,.04); color:var(--text); border-color:var(--panel-border); }
+  .btn-ghost:hover{ background:rgba(255,255,255,.09); }
+  .btn-block{ width:100%; }
+
+  /* ---------- Nav ---------- */
+  header.site{
+    position:sticky; top:0; z-index:50;
+    backdrop-filter:blur(14px);
+    background:rgba(8,9,15,.72);
+    border-bottom:1px solid var(--panel-border);
+  }
+  .nav-row{ display:flex; align-items:center; justify-content:space-between; height:72px; }
+  .logo{ display:flex; align-items:center; gap:10px; font-weight:700; font-size:18px; }
+  .logo .mark{
+    width:34px; height:34px; border-radius:10px; background:var(--grad);
+    display:flex; align-items:center; justify-content:center; font-size:17px;
+  }
+  nav.links{ display:flex; gap:32px; font-size:14.5px; color:var(--text-dim); }
+  nav.links a:hover{ color:var(--text); }
+  .nav-actions{ display:flex; align-items:center; gap:14px; }
+  .burger{ display:none; width:38px; height:38px; border-radius:10px; border:1px solid var(--panel-border); background:rgba(255,255,255,.04); align-items:center; justify-content:center; cursor:pointer; }
+  .burger span, .burger span::before, .burger span::after{
+    content:""; display:block; width:16px; height:2px; background:var(--text); position:relative; transition:.2s;
+  }
+  .burger span::before{ position:absolute; top:-5px; }
+  .burger span::after{ position:absolute; top:5px; }
+  #mobile-menu{ display:none; border-top:1px solid var(--panel-border); background:var(--bg-soft); }
+  #mobile-menu.open{ display:block; }
+  #mobile-menu .wrap{ padding:18px 24px 26px; display:flex; flex-direction:column; gap:16px; }
+  #mobile-menu a{ color:var(--text-dim); font-size:15px; }
+
+  /* ---------- Hero ---------- */
+  .hero{ position:relative; padding:96px 0 60px; overflow:hidden; }
+  .hero-glow{
+    position:absolute; inset:-20% -10% auto -10%; height:640px;
+    background:radial-gradient(60% 60% at 30% 20%, rgba(255,77,141,.22), transparent 70%),
+               radial-gradient(50% 50% at 75% 10%, rgba(124,92,255,.25), transparent 70%),
+               radial-gradient(40% 40% at 55% 45%, rgba(53,212,199,.16), transparent 70%);
+    filter:blur(10px); pointer-events:none;
+  }
+  .hero-grid{ position:relative; display:grid; grid-template-columns:1.05fr .95fr; gap:56px; align-items:center; }
+  .eyebrow{
+    display:inline-flex; align-items:center; gap:8px; padding:7px 14px; border-radius:999px;
+    background:rgba(255,255,255,.05); border:1px solid var(--panel-border); font-size:13px; color:var(--text-dim);
+    margin-bottom:22px;
+  }
+  .eyebrow .dot{ width:6px; height:6px; border-radius:50%; background:var(--accent1); box-shadow:0 0 0 3px rgba(255,77,141,.2); }
+  h1.hero-title{ font-size:46px; line-height:1.28; font-weight:900; margin:0 0 20px; }
+  .hero-sub{ font-size:17px; line-height:1.85; color:var(--text-dim); margin:0 0 32px; max-width:520px; }
+  .hero-cta{ display:flex; gap:14px; flex-wrap:wrap; margin-bottom:28px; }
+  .hero-note{ font-size:13px; color:var(--text-dim); display:flex; align-items:center; gap:8px; }
+  .hero-note svg{ width:16px; height:16px; flex:none; color:var(--accent3); }
+
+  /* Phone mock */
+  .phone-stage{ position:relative; display:flex; justify-content:center; }
+  .phone{
+    width:270px; aspect-ratio:9/19.5; border-radius:38px; background:#000;
+    border:6px solid #1c1e2b; box-shadow:0 30px 80px -20px rgba(0,0,0,.7), 0 0 0 1px rgba(255,255,255,.04);
+    position:relative; overflow:hidden;
+  }
+  .phone .screen{
+    position:absolute; inset:0; border-radius:32px; overflow:hidden;
+    background:linear-gradient(160deg,#241a3a,#150f22 45%,#1a1226);
+  }
+  .phone .notch{ position:absolute; top:10px; left:50%; transform:translateX(-50%); width:80px; height:20px; background:#000; border-radius:12px; z-index:5; }
+  .reel-scene{
+    position:absolute; inset:0; display:flex; align-items:flex-end;
+    background:
+      linear-gradient(0deg, rgba(0,0,0,.75), rgba(0,0,0,0) 45%),
+      linear-gradient(160deg, #ff4d8d33, #7c5cff33 55%, #35d4c733);
+  }
+  .reel-caption{ padding:18px 16px 22px; width:100%; }
+  .reel-caption .tag{
+    display:inline-block; font-size:11px; font-weight:700; padding:4px 10px; border-radius:999px;
+    background:var(--grad); color:#08090f; margin-bottom:10px;
+  }
+  .reel-caption .cap-text{ font-size:13px; color:#fff; line-height:1.6; text-shadow:0 1px 6px rgba(0,0,0,.6); }
+  .reel-caption .price-chip{
+    margin-top:10px; display:inline-flex; align-items:center; gap:6px; background:rgba(0,0,0,.5);
+    border:1px solid rgba(255,255,255,.18); padding:6px 10px; border-radius:10px; font-size:12px; color:#fff;
+  }
+  .reel-sidebar{ position:absolute; right:12px; bottom:100px; display:flex; flex-direction:column; gap:16px; align-items:center; }
+  .reel-sidebar .ic{ width:34px; height:34px; border-radius:50%; background:rgba(255,255,255,.14); display:flex; align-items:center; justify-content:center; color:#fff; font-size:15px; }
+  .float-card{
+    position:absolute; background:rgba(18,20,31,.92); border:1px solid var(--panel-border);
+    border-radius:14px; padding:10px 14px; font-size:12.5px; display:flex; align-items:center; gap:8px;
+    box-shadow:0 20px 40px -12px rgba(0,0,0,.6); backdrop-filter:blur(6px);
+  }
+  .float-card svg{ width:16px; height:16px; color:var(--accent3); flex:none; }
+  .float-1{ top:6%; left:-14%; }
+  .float-2{ bottom:14%; right:-16%; }
+
+  @keyframes floaty{ 0%,100%{ transform:translateY(0);} 50%{ transform:translateY(-10px);} }
+  .float-1{ animation:floaty 5s ease-in-out infinite; }
+  .float-2{ animation:floaty 5.5s ease-in-out infinite 1s; }
+
+  /* ---------- Platform strip ---------- */
+  .strip{ border-top:1px solid var(--panel-border); border-bottom:1px solid var(--panel-border); background:var(--bg-soft); padding:26px 0; }
+  .strip .wrap{ display:flex; align-items:center; justify-content:center; gap:44px; flex-wrap:wrap; color:var(--text-dim); font-size:13.5px; }
+  .strip .item{ display:flex; align-items:center; gap:8px; font-weight:700; letter-spacing:.02em; }
+  .strip .item svg{ width:18px; height:18px; }
+
+  /* ---------- Section shared ---------- */
+  section{ padding:104px 0; position:relative; }
+  .section-head{ text-align:center; max-width:640px; margin:0 auto 60px; }
+  .section-kicker{ font-size:13px; font-weight:700; letter-spacing:.14em; color:var(--accent3); text-transform:uppercase; margin-bottom:14px; }
+  h2.section-title{ font-size:34px; font-weight:900; margin:0 0 16px; line-height:1.35; }
+  .section-desc{ color:var(--text-dim); font-size:15.5px; line-height:1.85; }
+
+  /* ---------- Feature grid ---------- */
+  .feature-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:20px; }
+  .feature-card{
+    background:var(--panel); border:1px solid var(--panel-border); border-radius:20px; padding:28px 26px;
+    transition:border-color .2s ease, transform .2s ease;
+  }
+  .feature-card:hover{ border-color:rgba(255,255,255,.22); transform:translateY(-4px); }
+  .feature-icon{
+    width:46px; height:46px; border-radius:13px; display:flex; align-items:center; justify-content:center;
+    background:rgba(255,255,255,.06); margin-bottom:18px; color:var(--accent3);
+  }
+  .feature-icon svg{ width:22px; height:22px; }
+  .feature-card h3{ font-size:16.5px; margin:0 0 8px; font-weight:700; }
+  .feature-card p{ font-size:13.8px; color:var(--text-dim); line-height:1.75; margin:0; }
+
+  /* ---------- Steps ---------- */
+  .steps{ display:grid; grid-template-columns:repeat(4,1fr); gap:20px; counter-reset:step; }
+  .step{ position:relative; background:var(--panel); border:1px solid var(--panel-border); border-radius:20px; padding:30px 24px 26px; }
+  .step .num{
+    width:38px; height:38px; border-radius:11px; background:var(--grad); color:#08090f; font-weight:800;
+    display:flex; align-items:center; justify-content:center; margin-bottom:20px; font-size:15px;
+  }
+  .step h3{ font-size:15.5px; margin:0 0 8px; }
+  .step p{ font-size:13.3px; color:var(--text-dim); line-height:1.7; margin:0; }
+  .step-arrow{ position:absolute; top:34px; right:-26px; color:var(--panel-border); z-index:2; }
+  .step-arrow svg{ width:20px; height:20px; }
+
+  /* ---------- Chat re-edit ---------- */
+  .chat-panel{
+    background:var(--panel); border:1px solid var(--panel-border); border-radius:24px; padding:30px;
+    max-width:520px; margin:0 auto;
+  }
+  .chat-msg{ display:flex; gap:12px; margin-bottom:18px; align-items:flex-start; }
+  .chat-msg.user{ flex-direction:row-reverse; }
+  .chat-avatar{ width:32px; height:32px; border-radius:50%; flex:none; display:flex; align-items:center; justify-content:center; font-size:14px; }
+  .chat-avatar.ai{ background:var(--grad); color:#08090f; }
+  .chat-avatar.user{ background:rgba(255,255,255,.1); }
+  .bubble{ padding:12px 16px; border-radius:16px; font-size:13.8px; line-height:1.65; max-width:78%; }
+  .bubble.ai{ background:rgba(255,255,255,.05); border:1px solid var(--panel-border); border-top-left-radius:4px; }
+  .bubble.user{ background:var(--grad); color:#08090f; font-weight:600; border-top-right-radius:4px; }
+  .chip-row{ display:flex; gap:8px; flex-wrap:wrap; margin-top:20px; }
+  .chip{ font-size:12.5px; padding:8px 14px; border-radius:999px; background:rgba(255,255,255,.05); border:1px solid var(--panel-border); color:var(--text-dim); }
+
+  /* ---------- Platform export ---------- */
+  .platform-row{ display:grid; grid-template-columns:repeat(3,1fr); gap:28px; }
+  .platform-card{ text-align:center; }
+  .p-phone{
+    width:100%; max-width:190px; margin:0 auto 20px; aspect-ratio:9/16; border-radius:22px;
+    border:5px solid #1c1e2b; overflow:hidden; position:relative; background:linear-gradient(160deg,#241a3a,#150f22 50%,#1a1226);
+  }
+  .p-phone .label{ position:absolute; top:10px; left:10px; right:10px; display:flex; justify-content:space-between; font-size:9px; color:rgba(255,255,255,.7); }
+  .p-phone .bars{ position:absolute; bottom:14px; left:14px; right:14px; height:3px; background:rgba(255,255,255,.15); border-radius:3px; overflow:hidden; }
+  .p-phone .bars i{ display:block; height:100%; width:62%; background:var(--grad); }
+  .platform-card h3{ font-size:15px; margin:0 0 6px; }
+  .platform-card p{ font-size:12.8px; color:var(--text-dim); margin:0; }
+
+  /* ---------- Pricing ---------- */
+  .price-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:22px; align-items:stretch; }
+  .price-card{
+    background:var(--panel); border:1px solid var(--panel-border); border-radius:22px; padding:34px 28px;
+    display:flex; flex-direction:column;
+  }
+  .price-card.highlight{ border-color:var(--accent2); box-shadow:0 0 0 1px var(--accent2), 0 24px 60px -20px rgba(124,92,255,.35); position:relative; }
+  .price-badge{ position:absolute; top:-13px; left:50%; transform:translateX(-50%); background:var(--grad); color:#08090f; font-size:11.5px; font-weight:800; padding:5px 14px; border-radius:999px; }
+  .price-card h3{ font-size:17px; margin:0 0 6px; }
+  .price-card .plan-desc{ font-size:13px; color:var(--text-dim); margin:0 0 22px; }
+  .price-card .amount{ font-size:36px; font-weight:900; margin-bottom:2px; }
+  .price-card .amount span{ font-size:14px; color:var(--text-dim); font-weight:500; }
+  .price-card ul{ list-style:none; padding:0; margin:22px 0 28px; display:flex; flex-direction:column; gap:12px; flex:1; }
+  .price-card li{ font-size:13.5px; color:var(--text-dim); display:flex; gap:10px; align-items:flex-start; }
+  .price-card li svg{ width:16px; height:16px; color:var(--accent3); flex:none; margin-top:2px; }
+
+  /* ---------- FAQ ---------- */
+  .faq-list{ max-width:760px; margin:0 auto; display:flex; flex-direction:column; gap:12px; }
+  .faq-item{ background:var(--panel); border:1px solid var(--panel-border); border-radius:16px; overflow:hidden; }
+  .faq-q{ display:flex; align-items:center; justify-content:space-between; padding:20px 24px; cursor:pointer; font-size:14.8px; font-weight:700; gap:16px; }
+  .faq-q svg{ width:18px; height:18px; flex:none; color:var(--text-dim); transition:transform .2s ease; }
+  .faq-item.open .faq-q svg{ transform:rotate(45deg); }
+  .faq-a{ max-height:0; overflow:hidden; transition:max-height .25s ease; }
+  .faq-item.open .faq-a{ max-height:220px; }
+  .faq-a p{ margin:0; padding:0 24px 20px; font-size:13.8px; color:var(--text-dim); line-height:1.75; }
+
+  /* ---------- CTA banner ---------- */
+  .cta-banner{
+    border-radius:28px; padding:64px 48px; text-align:center; position:relative; overflow:hidden;
+    background:linear-gradient(135deg, rgba(255,77,141,.16), rgba(124,92,255,.18) 55%, rgba(53,212,199,.14));
+    border:1px solid var(--panel-border);
+  }
+  .cta-banner h2{ font-size:30px; margin:0 0 14px; font-weight:900; }
+  .cta-banner p{ color:var(--text-dim); font-size:15px; margin:0 0 30px; }
+  .cta-banner .hero-cta{ justify-content:center; }
+
+  /* ---------- Footer ---------- */
+  footer{ border-top:1px solid var(--panel-border); padding:56px 0 34px; }
+  .footer-top{ display:flex; justify-content:space-between; gap:40px; flex-wrap:wrap; margin-bottom:40px; }
+  .footer-brand p{ color:var(--text-dim); font-size:13.5px; max-width:280px; line-height:1.7; margin-top:14px; }
+  .footer-cols{ display:flex; gap:60px; flex-wrap:wrap; }
+  .footer-col h4{ font-size:13px; color:var(--text-dim); margin:0 0 16px; font-weight:700; letter-spacing:.04em; }
+  .footer-col a{ display:block; font-size:13.8px; color:var(--text); opacity:.8; margin-bottom:12px; }
+  .footer-col a:hover{ opacity:1; }
+  .footer-bottom{ border-top:1px solid var(--panel-border); padding-top:24px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:12px; font-size:12.5px; color:var(--text-dim); }
+
+  .reveal{ opacity:0; transform:translateY(18px); transition:opacity .6s ease, transform .6s ease; }
+  .reveal.show{ opacity:1; transform:translateY(0); }
+
+  @media (max-width: 920px){
+    nav.links{ display:none; }
+    .burger{ display:flex; }
+    .hero-grid{ grid-template-columns:1fr; }
+    .phone-stage{ order:-1; margin-bottom:20px; }
+    h1.hero-title{ font-size:34px; }
+    .feature-grid{ grid-template-columns:repeat(2,1fr); }
+    .steps{ grid-template-columns:repeat(2,1fr); }
+    .step-arrow{ display:none; }
+    .platform-row{ grid-template-columns:1fr; max-width:260px; margin:0 auto; }
+    .price-grid{ grid-template-columns:1fr; }
+    .strip .wrap{ gap:24px; }
+  }
+  @media (max-width: 560px){
+    .feature-grid{ grid-template-columns:1fr; }
+    .steps{ grid-template-columns:1fr; }
+    section{ padding:72px 0; }
+    h2.section-title{ font-size:26px; }
+    .cta-banner{ padding:44px 24px; }
+    .float-1, .float-2{ display:none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ================= HEADER ================= -->
+<header class="site">
+  <div class="wrap nav-row">
+    <a href="#top" class="logo"><span class="mark">🎬</span>ReelCraft <span class="grad-text">AI</span></a>
+    <nav class="links">
+      <a href="#features">機能</a>
+      <a href="#how">使い方</a>
+      <a href="#platforms">対応SNS</a>
+      <a href="#pricing">料金</a>
+      <a href="#faq">よくある質問</a>
+    </nav>
+    <div class="nav-actions">
+      <a href="#pricing" class="btn btn-ghost" style="padding:11px 20px; font-size:14px;">料金を見る</a>
+      <a href="#cta" class="btn btn-primary" style="padding:11px 22px; font-size:14px;">無料で試す</a>
+      <div class="burger" id="burger"><span></span></div>
+    </div>
+  </div>
+  <div id="mobile-menu">
+    <div class="wrap">
+      <a href="#features">機能</a>
+      <a href="#how">使い方</a>
+      <a href="#platforms">対応SNS</a>
+      <a href="#pricing">料金</a>
+      <a href="#faq">よくある質問</a>
+    </div>
+  </div>
+</header>
+
+<!-- ================= HERO ================= -->
+<section id="top" class="hero">
+  <div class="hero-glow"></div>
+  <div class="wrap hero-grid">
+    <div>
+      <div class="eyebrow"><span class="dot"></span>飲食店・店舗のための AI動画編集</div>
+      <h1 class="hero-title">動画をアップロードするだけ。<br>AIが<span class="grad-text">「バズるリール」</span>を<br>自動で作る。</h1>
+      <p class="hero-sub">料理・外観・店内・スタッフをAIが自動で判定し、良い瞬間だけを抽出。字幕・商品情報・BGMカットまで自動編集して、Instagram / TikTok / Shorts に最適化したリールを複数パターン一度に生成します。</p>
+      <div class="hero-cta">
+        <a href="#cta" class="btn btn-primary">無料でリールを作ってみる</a>
+        <a href="#how" class="btn btn-ghost">使い方を見る</a>
+      </div>
+      <div class="hero-note">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>
+        動画編集の経験・専門スキルは不要です
+      </div>
+    </div>
+
+    <div class="phone-stage">
+      <div class="float-card float-1">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20v-6M6 20V10M18 20V4"/></svg>
+        BGMのビートに合わせて自動カット
+      </div>
+      <div class="phone">
+        <div class="notch"></div>
+        <div class="screen">
+          <div class="reel-scene">
+            <div class="reel-sidebar">
+              <div class="ic">❤️</div>
+              <div class="ic">💬</div>
+              <div class="ic">↗️</div>
+            </div>
+            <div class="reel-caption">
+              <span class="tag">AI自動生成 ・ Reels版</span>
+              <div class="cap-text">"香ばしい炭火焼きの香りが店内いっぱいに…"</div>
+              <div class="price-chip">🍽️ 炭火焼きランチ ¥1,280</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="float-card float-2">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+        字幕・商品名を自動表示
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= PLATFORM STRIP ================= -->
+<div class="strip">
+  <div class="wrap">
+    <div class="item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1"/></svg>Instagram Reels</div>
+    <div class="item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 3v10.5a3.5 3.5 0 1 1-3.5-3.5"/><path d="M16 8c1.5 1.2 3 1.5 4 1.5V6c-1 0-2.3-.6-3-1.6"/></svg>TikTok</div>
+    <div class="item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9l5 3-5 3z"/></svg>YouTube Shorts</div>
+  </div>
+</div>
+
+<!-- ================= FEATURES ================= -->
+<section id="features">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="section-kicker">Features</div>
+      <h2 class="section-title">「撮っただけの動画」を<br>投稿できるリールに変える9つの機能</h2>
+      <p class="section-desc">AIが映像・音声を理解して編集するから、素材を眺めて切り貼りする時間がゼロになります。</p>
+    </div>
+
+    <div class="feature-grid">
+      <div class="feature-card reveal">
+        <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="15" height="14" rx="2"/><path d="M17 9l5-3v12l-5-3"/></svg></div>
+        <h3>動画の中身をAIが解析</h3>
+        <p>アップロードした動画をAIが自動で読み込み、シーンごとの構成・映り・音声を丸ごと解析します。</p>
+      </div>
+      <div class="feature-card reveal">
+        <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5L18 18M18 6l-2.5 2.5M8.5 15.5L6 18"/><circle cx="12" cy="12" r="3"/></svg></div>
+        <h3>被写体を自動で判定</h3>
+        <p>「料理」「外観」「店内」「スタッフ」などを映像から自動で判定し、シーンごとにタグ付けします。</p>
+      </div>
+      <div class="feature-card reveal">
+        <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.4 7.2H22l-6 4.4 2.3 7.1L12 16.3l-6.3 4.4L8 13.6 2 9.2h7.6z"/></svg></div>
+        <h3>良い瞬間だけを自動抽出</h3>
+        <p>ブレ・空白・単調なカットを除き、思わず見入る瞬間だけを選んでハイライト化します。</p>
+      </div>
+      <div class="feature-card reveal">
+        <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a4 4 0 0 1 4 4v6a4 4 0 1 1-8 0V5a4 4 0 0 1 4-4z"/><path d="M5 10v1a7 7 0 0 0 14 0v-1M12 18v4"/></svg></div>
+        <h3>音声から字幕を自動生成</h3>
+        <p>話している内容を自動で文字起こしし、読みやすい字幕として動画に自動配置します。</p>
+      </div>
+      <div class="feature-card reveal">
+        <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18M3 12h18M3 17h11"/><circle cx="19" cy="17" r="2"/></svg></div>
+        <h3>商品名・価格・特典を自動表示</h3>
+        <p>映っている商品やキャンペーン情報をテロップとして自動配置。伝え忘れがなくなります。</p>
+      </div>
+      <div class="feature-card reveal">
+        <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h2v6H4zM9 6h2v12H9zM14 9h2v9h-2zM19 3h2v15h-2z"/></svg></div>
+        <h3>BGMのビートに合わせてカット</h3>
+        <p>選んだ楽曲のリズムを解析し、ビートに合わせて自動でカット割りを作ります。</p>
+      </div>
+      <div class="feature-card reveal">
+        <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="7" y="2" width="10" height="20" rx="3"/><path d="M11 18h2"/></svg></div>
+        <h3>SNS別に自動最適化</h3>
+        <p>Instagram・TikTok・Shorts、それぞれの縦横比・尺・トレンドに合わせて自動書き出し。</p>
+      </div>
+      <div class="feature-card reveal">
+        <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.4 8.4 0 0 1-8.9 8.5 8.5 8.5 0 0 1-4.3-1.1L3 20l1.2-4.6A8.4 8.4 0 0 1 12.6 3a8.4 8.4 0 0 1 8.4 8.5z"/></svg></div>
+        <h3>一言だけで再編集</h3>
+        <p>「もっと高級感に」「料理を大きく」「若者向けに」と伝えるだけで、AIがトーンを再編集します。</p>
+      </div>
+      <div class="feature-card reveal">
+        <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></div>
+        <h3>複数パターンを同時生成</h3>
+        <p>1本の素材から、テイストの異なる完成リールを何パターンも自動で作り分けます。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= HOW IT WORKS ================= -->
+<section id="how" style="background:var(--bg-soft); border-top:1px solid var(--panel-border); border-bottom:1px solid var(--panel-border);">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="section-kicker">How it works</div>
+      <h2 class="section-title">4ステップで、投稿までが終わる</h2>
+      <p class="section-desc">編集ソフトを開く必要はありません。すべてブラウザの中で完結します。</p>
+    </div>
+
+    <div class="steps">
+      <div class="step reveal">
+        <div class="num">01</div>
+        <h3>動画をアップロード</h3>
+        <p>スマホで撮った素材をそのままアップロードするだけ。長さや画質は問いません。</p>
+        <div class="step-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+      </div>
+      <div class="step reveal">
+        <div class="num">02</div>
+        <h3>AIが映像を解析</h3>
+        <p>料理・外観・店内・スタッフを判定し、良い瞬間だけを自動でピックアップします。</p>
+        <div class="step-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+      </div>
+      <div class="step reveal">
+        <div class="num">03</div>
+        <h3>字幕・情報・BGMを自動追加</h3>
+        <p>字幕、商品名や価格、キャンペーン情報、ビート同期のカットまで自動で仕上げます。</p>
+        <div class="step-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+      </div>
+      <div class="step reveal">
+        <div class="num">04</div>
+        <h3>複数パターンを書き出し</h3>
+        <p>Instagram / TikTok / Shorts向けに最適化した完成リールを、複数パターン同時に生成。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= CHAT RE-EDIT ================= -->
+<section>
+  <div class="wrap hero-grid" style="align-items:center;">
+    <div class="reveal">
+      <div class="section-kicker">One-line editing</div>
+      <h2 class="section-title">「もっと高級感に」<br>その一言で、AIが編集し直す。</h2>
+      <p class="section-desc" style="margin-bottom:28px;">専門用語も操作も不要。伝えたいトーンを話しかけるだけで、色味・カット・BGM・テロップをAIが自動で調整します。</p>
+      <div class="chip-row">
+        <span class="chip">もっと高級感に</span>
+        <span class="chip">料理を大きく</span>
+        <span class="chip">若者向けに</span>
+        <span class="chip">テンポを速く</span>
+      </div>
+    </div>
+
+    <div class="chat-panel reveal">
+      <div class="chat-msg user">
+        <div class="chat-avatar user">🧑</div>
+        <div class="bubble user">もっと高級感が出るように編集して</div>
+      </div>
+      <div class="chat-msg">
+        <div class="chat-avatar ai">🎬</div>
+        <div class="bubble ai">色味を落ち着いたトーンに変更し、BGMをアップテンポからジャズ系に変更しました。カットの間も少し長めに調整しています。</div>
+      </div>
+      <div class="chat-msg user">
+        <div class="chat-avatar user">🧑</div>
+        <div class="bubble user">料理のカットをもっと大きく見せて</div>
+      </div>
+      <div class="chat-msg">
+        <div class="chat-avatar ai">🎬</div>
+        <div class="bubble ai">料理シーンをズームで強調し、盛り付けのアップカットを追加しました。3パターン生成しています。</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= PLATFORMS ================= -->
+<section id="platforms" style="background:var(--bg-soft); border-top:1px solid var(--panel-border); border-bottom:1px solid var(--panel-border);">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="section-kicker">Multi-platform export</div>
+      <h2 class="section-title">SNSごとの「正解の形」に自動で合わせる</h2>
+      <p class="section-desc">縦横比・尺・字幕の見せ方まで、プラットフォームごとの最適解に自動書き出しします。</p>
+    </div>
+
+    <div class="platform-row">
+      <div class="platform-card reveal">
+        <div class="p-phone">
+          <div class="label"><span>Reels</span><span>0:24</span></div>
+          <div class="bars"><i></i></div>
+        </div>
+        <h3>Instagram Reels</h3>
+        <p>9:16・最大90秒目安 / トレンド音源に合わせたテンポ編集</p>
+      </div>
+      <div class="platform-card reveal">
+        <div class="p-phone">
+          <div class="label"><span>TikTok</span><span>0:18</span></div>
+          <div class="bars"><i style="width:80%"></i></div>
+        </div>
+        <h3>TikTok</h3>
+        <p>9:16・スピード感のあるカットとテキストで冒頭2秒を強化</p>
+      </div>
+      <div class="platform-card reveal">
+        <div class="p-phone">
+          <div class="label"><span>Shorts</span><span>0:31</span></div>
+          <div class="bars"><i style="width:44%"></i></div>
+        </div>
+        <h3>YouTube Shorts</h3>
+        <p>9:16・検索に強いタイトル/字幕設計で流入を最大化</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= PRICING ================= -->
+<section id="pricing">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="section-kicker">Pricing</div>
+      <h2 class="section-title">シンプルな料金プラン</h2>
+      <p class="section-desc">まずは無料で1本作成。合わなければいつでも解約できます。</p>
+    </div>
+
+    <div class="price-grid">
+      <div class="price-card reveal">
+        <h3>Starter</h3>
+        <p class="plan-desc">まずは試したい個人店舗向け</p>
+        <div class="amount">¥0<span> / 月</span></div>
+        <ul>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>月3本まで自動生成</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>字幕・BGM自動編集</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>SNS 1媒体向け書き出し</li>
+        </ul>
+        <a href="#cta" class="btn btn-ghost btn-block">無料で始める</a>
+      </div>
+
+      <div class="price-card highlight reveal">
+        <div class="price-badge">人気プラン</div>
+        <h3>Business</h3>
+        <p class="plan-desc">複数店舗・毎週投稿する店舗向け</p>
+        <div class="amount">¥9,800<span> / 月</span></div>
+        <ul>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>月30本まで自動生成</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>一言指示による再編集</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>Instagram / TikTok / Shorts 同時書き出し</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>商品名・価格の自動テロップ</li>
+        </ul>
+        <a href="#cta" class="btn btn-primary btn-block">Businessで始める</a>
+      </div>
+
+      <div class="price-card reveal">
+        <h3>Pro</h3>
+        <p class="plan-desc">チェーン展開・代理店向け</p>
+        <div class="amount">お問い合わせ</div>
+        <ul>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>生成本数の上限なし</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>複数店舗・複数アカウント管理</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>専任担当によるオンボーディング</li>
+        </ul>
+        <a href="#cta" class="btn btn-ghost btn-block">相談する</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= FAQ ================= -->
+<section id="faq" style="background:var(--bg-soft); border-top:1px solid var(--panel-border); border-bottom:1px solid var(--panel-border);">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="section-kicker">FAQ</div>
+      <h2 class="section-title">よくある質問</h2>
+    </div>
+    <div class="faq-list">
+      <div class="faq-item reveal">
+        <div class="faq-q">動画編集の知識がなくても使えますか？<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></div>
+        <div class="faq-a"><p>はい。動画をアップロードするだけで、シーン判定から字幕・BGM同期・SNS別の書き出しまでAIが自動で行うため、編集経験は必要ありません。</p></div>
+      </div>
+      <div class="faq-item reveal">
+        <div class="faq-q">「一言で再編集」とはどういう機能ですか？<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></div>
+        <div class="faq-a"><p>「もっと高級感に」「料理を大きく」「若者向けに」といった一言の指示を伝えるだけで、色味・カット割り・BGM・テロップをAIが自動で調整して再生成します。</p></div>
+      </div>
+      <div class="faq-item reveal">
+        <div class="faq-q">どのSNSに対応していますか？<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></div>
+        <div class="faq-a"><p>Instagram Reels、TikTok、YouTube Shortsに対応しており、それぞれの縦横比・尺・トレンドに合わせて最適化された形式で書き出せます。</p></div>
+      </div>
+      <div class="faq-item reveal">
+        <div class="faq-q">1本の動画から何パターン作れますか？<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></div>
+        <div class="faq-a"><p>1本の素材からテイストの異なる完成リールを複数パターン自動生成できます。生成本数はプランによって異なります。</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= CTA ================= -->
+<section id="cta">
+  <div class="wrap">
+    <div class="cta-banner reveal">
+      <h2>次に撮る動画から、<span class="grad-text">投稿の悩み</span>をなくす。</h2>
+      <p>まずは無料で1本、あなたのお店の動画をリールに変えてみましょう。</p>
+      <div class="hero-cta">
+        <a href="#" class="btn btn-primary">無料でリールを作ってみる</a>
+        <a href="#pricing" class="btn btn-ghost">料金プランを見る</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= FOOTER ================= -->
+<footer>
+  <div class="wrap">
+    <div class="footer-top">
+      <div class="footer-brand">
+        <a href="#top" class="logo"><span class="mark">🎬</span>ReelCraft <span class="grad-text">AI</span></a>
+        <p>お店の動画をAIが解析し、Instagram / TikTok / Shorts向けのリールを自動で作る編集サービス。</p>
+      </div>
+      <div class="footer-cols">
+        <div class="footer-col">
+          <h4>サービス</h4>
+          <a href="#features">機能</a>
+          <a href="#how">使い方</a>
+          <a href="#platforms">対応SNS</a>
+          <a href="#pricing">料金</a>
+        </div>
+        <div class="footer-col">
+          <h4>サポート</h4>
+          <a href="#faq">よくある質問</a>
+          <a href="#cta">お問い合わせ</a>
+        </div>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>© 2026 ReelCraft AI. All rights reserved.</span>
+      <span>本ページはサービス紹介用のデモLPです。</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // Mobile menu
+  const burger = document.getElementById('burger');
+  const mobileMenu = document.getElementById('mobile-menu');
+  burger.addEventListener('click', () => {
+    mobileMenu.classList.toggle('open');
+  });
+  mobileMenu.querySelectorAll('a').forEach(a => a.addEventListener('click', () => mobileMenu.classList.remove('open')));
+
+  // Scroll reveal
+  const revealEls = document.querySelectorAll('.reveal');
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('show');
+        io.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.12 });
+  revealEls.forEach(el => io.observe(el));
+
+  // FAQ accordion
+  document.querySelectorAll('.faq-item').forEach(item => {
+    item.querySelector('.faq-q').addEventListener('click', () => {
+      const isOpen = item.classList.contains('open');
+      document.querySelectorAll('.faq-item.open').forEach(o => o.classList.remove('open'));
+      if (!isOpen) item.classList.add('open');
+    });
+  });
+</script>
+</body>
+</html>
