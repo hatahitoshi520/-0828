@@ -3,9 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ReelCraft AI | 動画からバズるリールをAIが自動生成</title>
-<meta name="description" content="お店の動画をアップロードするだけ。AIが料理・外観・店内・スタッフの良い瞬間を自動検出し、字幕・商品情報・BGMカットまで自動編集。Instagram・TikTok・Shorts向けに最適化したリールを複数パターン自動生成します。">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎬</text></svg>">
+<title>ReelCraft AI Studio | 動画からAIがリールを自動編集</title>
+<meta name="description" content="動画をアップロードすると、AI(Claude)がシーンを解析してカテゴリ判定・良い瞬間の抽出・BGMビート同期・一言指示での再編集までを行い、SNS用リールの編集タイムラインとプレビューを作成する個人利用向けツールです。">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
@@ -15,684 +14,1303 @@
     --bg: #08090f;
     --bg-soft: #0d0f1a;
     --panel: #12141f;
-    --panel-border: rgba(255,255,255,0.08);
+    --panel-2: #171a28;
+    --panel-border: rgba(255,255,255,0.09);
     --text: #f3f4f8;
     --text-dim: #9498ab;
     --accent1: #ff4d8d;
     --accent2: #7c5cff;
     --accent3: #35d4c7;
+    --danger: #ff6b6b;
     --grad: linear-gradient(135deg, var(--accent1), var(--accent2) 55%, var(--accent3));
   }
   *{box-sizing:border-box;}
   html{scroll-behavior:smooth;}
   body{
     margin:0; background:var(--bg); color:var(--text);
-    font-family:"Noto Sans JP", "Hiragino Sans", sans-serif;
+    font-family:"Noto Sans JP","Hiragino Sans",sans-serif;
     -webkit-font-smoothing:antialiased;
-    overflow-x:hidden;
   }
-  h1,h2,h3, .headline-font{ font-family:"Space Grotesk","Noto Sans JP",sans-serif; letter-spacing:-0.01em; }
-  a{color:inherit; text-decoration:none;}
-  img,svg{display:block;}
-  .wrap{ max-width:1180px; margin:0 auto; padding:0 24px; }
-  .grad-text{
-    background:var(--grad); -webkit-background-clip:text; background-clip:text; color:transparent;
-  }
+  h1,h2,h3,.headline-font{ font-family:"Space Grotesk","Noto Sans JP",sans-serif; letter-spacing:-0.01em; }
+  a{ color:inherit; }
+  img,svg{ display:block; }
+  .wrap{ max-width:1080px; margin:0 auto; padding:0 20px; }
+  .grad-text{ background:var(--grad); -webkit-background-clip:text; background-clip:text; color:transparent; }
+
+  /* buttons / inputs */
   .btn{
     display:inline-flex; align-items:center; justify-content:center; gap:8px;
-    padding:14px 28px; border-radius:999px; font-weight:700; font-size:15px;
+    padding:12px 22px; border-radius:12px; font-weight:700; font-size:14px;
     cursor:pointer; border:1px solid transparent; transition:transform .15s ease, box-shadow .15s ease, opacity .15s ease;
-    white-space:nowrap;
+    white-space:nowrap; font-family:inherit;
   }
-  .btn:active{ transform:scale(.97); }
-  .btn-primary{ background:var(--grad); color:#08090f; box-shadow:0 8px 30px -8px rgba(124,92,255,.6); }
-  .btn-primary:hover{ box-shadow:0 12px 34px -6px rgba(124,92,255,.75); }
-  .btn-ghost{ background:rgba(255,255,255,.04); color:var(--text); border-color:var(--panel-border); }
-  .btn-ghost:hover{ background:rgba(255,255,255,.09); }
-  .btn-block{ width:100%; }
+  .btn:disabled{ opacity:.4; cursor:not-allowed; }
+  .btn:active:not(:disabled){ transform:scale(.97); }
+  .btn-primary{ background:var(--grad); color:#08090f; box-shadow:0 8px 24px -8px rgba(124,92,255,.55); }
+  .btn-ghost{ background:rgba(255,255,255,.05); color:var(--text); border-color:var(--panel-border); }
+  .btn-ghost:hover{ background:rgba(255,255,255,.1); }
+  .btn-sm{ padding:8px 14px; font-size:12.5px; border-radius:9px; }
+  .btn-danger{ background:rgba(255,107,107,.15); color:#ffb4b4; border-color:rgba(255,107,107,.35); }
 
-  /* ---------- Nav ---------- */
+  input[type=text], input[type=number], select, textarea{
+    background:var(--panel-2); border:1px solid var(--panel-border); color:var(--text);
+    border-radius:9px; padding:9px 11px; font-size:13.5px; font-family:inherit; width:100%;
+  }
+  textarea{ resize:vertical; min-height:90px; line-height:1.6; }
+  input[type=checkbox]{ accent-color:var(--accent2); width:15px; height:15px; }
+  label{ font-size:13px; color:var(--text-dim); }
+  ::placeholder{ color:#5b5f74; }
+
+  /* header */
   header.site{
-    position:sticky; top:0; z-index:50;
-    backdrop-filter:blur(14px);
-    background:rgba(8,9,15,.72);
-    border-bottom:1px solid var(--panel-border);
+    position:sticky; top:0; z-index:60; backdrop-filter:blur(14px);
+    background:rgba(8,9,15,.78); border-bottom:1px solid var(--panel-border);
   }
-  .nav-row{ display:flex; align-items:center; justify-content:space-between; height:72px; }
-  .logo{ display:flex; align-items:center; gap:10px; font-weight:700; font-size:18px; }
-  .logo .mark{
-    width:34px; height:34px; border-radius:10px; background:var(--grad);
-    display:flex; align-items:center; justify-content:center; font-size:17px;
-  }
-  nav.links{ display:flex; gap:32px; font-size:14.5px; color:var(--text-dim); }
-  nav.links a:hover{ color:var(--text); }
-  .nav-actions{ display:flex; align-items:center; gap:14px; }
-  .burger{ display:none; width:38px; height:38px; border-radius:10px; border:1px solid var(--panel-border); background:rgba(255,255,255,.04); align-items:center; justify-content:center; cursor:pointer; }
-  .burger span, .burger span::before, .burger span::after{
-    content:""; display:block; width:16px; height:2px; background:var(--text); position:relative; transition:.2s;
-  }
-  .burger span::before{ position:absolute; top:-5px; }
-  .burger span::after{ position:absolute; top:5px; }
-  #mobile-menu{ display:none; border-top:1px solid var(--panel-border); background:var(--bg-soft); }
-  #mobile-menu.open{ display:block; }
-  #mobile-menu .wrap{ padding:18px 24px 26px; display:flex; flex-direction:column; gap:16px; }
-  #mobile-menu a{ color:var(--text-dim); font-size:15px; }
+  .nav-row{ display:flex; align-items:center; justify-content:space-between; height:66px; gap:14px; }
+  .logo{ display:flex; align-items:center; gap:10px; font-weight:700; font-size:17px; }
+  .logo .mark{ width:32px; height:32px; border-radius:10px; background:var(--grad); display:flex; align-items:center; justify-content:center; font-size:16px; }
+  .beta-badge{ font-size:10.5px; padding:3px 8px; border-radius:999px; background:rgba(255,255,255,.08); color:var(--text-dim); border:1px solid var(--panel-border); }
 
-  /* ---------- Hero ---------- */
-  .hero{ position:relative; padding:96px 0 60px; overflow:hidden; }
-  .hero-glow{
-    position:absolute; inset:-20% -10% auto -10%; height:640px;
-    background:radial-gradient(60% 60% at 30% 20%, rgba(255,77,141,.22), transparent 70%),
-               radial-gradient(50% 50% at 75% 10%, rgba(124,92,255,.25), transparent 70%),
-               radial-gradient(40% 40% at 55% 45%, rgba(53,212,199,.16), transparent 70%);
-    filter:blur(10px); pointer-events:none;
+  /* settings panel */
+  .settings-panel{
+    display:none; position:absolute; right:20px; top:60px; width:min(340px, 90vw);
+    background:var(--panel); border:1px solid var(--panel-border); border-radius:16px; padding:20px;
+    box-shadow:0 24px 60px -12px rgba(0,0,0,.6); z-index:70;
   }
-  .hero-grid{ position:relative; display:grid; grid-template-columns:1.05fr .95fr; gap:56px; align-items:center; }
+  .settings-panel.open{ display:block; }
+  .settings-panel h3{ font-size:14.5px; margin:0 0 4px; }
+  .settings-panel .hint{ font-size:12px; color:var(--text-dim); line-height:1.6; margin-bottom:14px; }
+  .field{ margin-bottom:14px; }
+  .field .field-label{ display:block; font-size:12.5px; color:var(--text-dim); margin-bottom:6px; }
+
+  main{ padding:40px 0 100px; }
+  .intro{ text-align:center; max-width:640px; margin:0 auto 40px; }
+  .intro h1{ font-size:30px; font-weight:900; margin:14px 0 12px; line-height:1.4; }
+  .intro p{ color:var(--text-dim); font-size:14.5px; line-height:1.8; }
   .eyebrow{
-    display:inline-flex; align-items:center; gap:8px; padding:7px 14px; border-radius:999px;
-    background:rgba(255,255,255,.05); border:1px solid var(--panel-border); font-size:13px; color:var(--text-dim);
-    margin-bottom:22px;
+    display:inline-flex; align-items:center; gap:8px; padding:6px 14px; border-radius:999px;
+    background:rgba(255,255,255,.05); border:1px solid var(--panel-border); font-size:12.5px; color:var(--text-dim);
   }
-  .eyebrow .dot{ width:6px; height:6px; border-radius:50%; background:var(--accent1); box-shadow:0 0 0 3px rgba(255,77,141,.2); }
-  h1.hero-title{ font-size:46px; line-height:1.28; font-weight:900; margin:0 0 20px; }
-  .hero-sub{ font-size:17px; line-height:1.85; color:var(--text-dim); margin:0 0 32px; max-width:520px; }
-  .hero-cta{ display:flex; gap:14px; flex-wrap:wrap; margin-bottom:28px; }
-  .hero-note{ font-size:13px; color:var(--text-dim); display:flex; align-items:center; gap:8px; }
-  .hero-note svg{ width:16px; height:16px; flex:none; color:var(--accent3); }
+  .eyebrow .dot{ width:6px; height:6px; border-radius:50%; background:var(--accent1); }
 
-  /* Phone mock */
-  .phone-stage{ position:relative; display:flex; justify-content:center; }
-  .phone{
-    width:270px; aspect-ratio:9/19.5; border-radius:38px; background:#000;
-    border:6px solid #1c1e2b; box-shadow:0 30px 80px -20px rgba(0,0,0,.7), 0 0 0 1px rgba(255,255,255,.04);
-    position:relative; overflow:hidden;
+  /* step card */
+  .step-card{
+    background:var(--panel); border:1px solid var(--panel-border); border-radius:20px;
+    padding:28px; margin-bottom:22px;
   }
-  .phone .screen{
-    position:absolute; inset:0; border-radius:32px; overflow:hidden;
-    background:linear-gradient(160deg,#241a3a,#150f22 45%,#1a1226);
-  }
-  .phone .notch{ position:absolute; top:10px; left:50%; transform:translateX(-50%); width:80px; height:20px; background:#000; border-radius:12px; z-index:5; }
-  .reel-scene{
-    position:absolute; inset:0; display:flex; align-items:flex-end;
-    background:
-      linear-gradient(0deg, rgba(0,0,0,.75), rgba(0,0,0,0) 45%),
-      linear-gradient(160deg, #ff4d8d33, #7c5cff33 55%, #35d4c733);
-  }
-  .reel-caption{ padding:18px 16px 22px; width:100%; }
-  .reel-caption .tag{
-    display:inline-block; font-size:11px; font-weight:700; padding:4px 10px; border-radius:999px;
-    background:var(--grad); color:#08090f; margin-bottom:10px;
-  }
-  .reel-caption .cap-text{ font-size:13px; color:#fff; line-height:1.6; text-shadow:0 1px 6px rgba(0,0,0,.6); }
-  .reel-caption .price-chip{
-    margin-top:10px; display:inline-flex; align-items:center; gap:6px; background:rgba(0,0,0,.5);
-    border:1px solid rgba(255,255,255,.18); padding:6px 10px; border-radius:10px; font-size:12px; color:#fff;
-  }
-  .reel-sidebar{ position:absolute; right:12px; bottom:100px; display:flex; flex-direction:column; gap:16px; align-items:center; }
-  .reel-sidebar .ic{ width:34px; height:34px; border-radius:50%; background:rgba(255,255,255,.14); display:flex; align-items:center; justify-content:center; color:#fff; font-size:15px; }
-  .float-card{
-    position:absolute; background:rgba(18,20,31,.92); border:1px solid var(--panel-border);
-    border-radius:14px; padding:10px 14px; font-size:12.5px; display:flex; align-items:center; gap:8px;
-    box-shadow:0 20px 40px -12px rgba(0,0,0,.6); backdrop-filter:blur(6px);
-  }
-  .float-card svg{ width:16px; height:16px; color:var(--accent3); flex:none; }
-  .float-1{ top:6%; left:-14%; }
-  .float-2{ bottom:14%; right:-16%; }
+  .step-card[hidden]{ display:none; }
+  .step-head{ display:flex; align-items:center; gap:12px; margin-bottom:20px; }
+  .step-num{ width:32px; height:32px; border-radius:10px; background:var(--grad); color:#08090f; font-weight:800; display:flex; align-items:center; justify-content:center; font-size:14px; flex:none; }
+  .step-head h2{ font-size:17px; margin:0; }
+  .step-head .step-sub{ font-size:12.5px; color:var(--text-dim); margin-top:2px; }
 
-  @keyframes floaty{ 0%,100%{ transform:translateY(0);} 50%{ transform:translateY(-10px);} }
-  .float-1{ animation:floaty 5s ease-in-out infinite; }
-  .float-2{ animation:floaty 5.5s ease-in-out infinite 1s; }
-
-  /* ---------- Platform strip ---------- */
-  .strip{ border-top:1px solid var(--panel-border); border-bottom:1px solid var(--panel-border); background:var(--bg-soft); padding:26px 0; }
-  .strip .wrap{ display:flex; align-items:center; justify-content:center; gap:44px; flex-wrap:wrap; color:var(--text-dim); font-size:13.5px; }
-  .strip .item{ display:flex; align-items:center; gap:8px; font-weight:700; letter-spacing:.02em; }
-  .strip .item svg{ width:18px; height:18px; }
-
-  /* ---------- Section shared ---------- */
-  section{ padding:104px 0; position:relative; }
-  .section-head{ text-align:center; max-width:640px; margin:0 auto 60px; }
-  .section-kicker{ font-size:13px; font-weight:700; letter-spacing:.14em; color:var(--accent3); text-transform:uppercase; margin-bottom:14px; }
-  h2.section-title{ font-size:34px; font-weight:900; margin:0 0 16px; line-height:1.35; }
-  .section-desc{ color:var(--text-dim); font-size:15.5px; line-height:1.85; }
-
-  /* ---------- Feature grid ---------- */
-  .feature-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:20px; }
-  .feature-card{
-    background:var(--panel); border:1px solid var(--panel-border); border-radius:20px; padding:28px 26px;
-    transition:border-color .2s ease, transform .2s ease;
+  /* dropzone */
+  .dropzone{
+    border:1.5px dashed var(--panel-border); border-radius:16px; padding:34px 20px; text-align:center;
+    cursor:pointer; transition:border-color .15s, background .15s;
   }
-  .feature-card:hover{ border-color:rgba(255,255,255,.22); transform:translateY(-4px); }
-  .feature-icon{
-    width:46px; height:46px; border-radius:13px; display:flex; align-items:center; justify-content:center;
-    background:rgba(255,255,255,.06); margin-bottom:18px; color:var(--accent3);
+  .dropzone:hover, .dropzone.drag{ border-color:var(--accent2); background:rgba(124,92,255,.06); }
+  .dropzone .dz-icon{ font-size:30px; margin-bottom:10px; }
+  .dropzone .dz-text{ font-size:13.5px; color:var(--text-dim); }
+  .upload-grid{ display:grid; grid-template-columns:1.3fr 1fr; gap:18px; }
+  .video-preview-wrap{ background:#000; border-radius:14px; overflow:hidden; position:relative; }
+  video{ width:100%; display:block; background:#000; }
+  .meta-row{ display:flex; flex-wrap:wrap; gap:10px; margin-top:12px; font-size:12.5px; color:var(--text-dim); }
+  .meta-chip{ background:var(--panel-2); border:1px solid var(--panel-border); padding:5px 10px; border-radius:8px; }
+  .bgm-box{ background:var(--panel-2); border:1px solid var(--panel-border); border-radius:14px; padding:16px; }
+  .bgm-box h3{ font-size:13.5px; margin:0 0 10px; }
+  .bgm-name{ font-size:12.5px; color:var(--text-dim); margin-top:8px; word-break:break-all; }
+
+  /* progress */
+  .progress-wrap{ margin-top:18px; }
+  .progress-label{ font-size:12.5px; color:var(--text-dim); margin-bottom:8px; }
+  .progress-bar{ height:8px; border-radius:999px; background:var(--panel-2); overflow:hidden; }
+  .progress-fill{ height:100%; width:0%; background:var(--grad); transition:width .25s ease; }
+
+  /* scene grid */
+  .scene-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(220px,1fr)); gap:14px; }
+  .scene-card{ background:var(--panel-2); border:1px solid var(--panel-border); border-radius:14px; overflow:hidden; display:flex; flex-direction:column; }
+  .scene-thumb{ width:100%; aspect-ratio:16/9; object-fit:cover; background:#000; }
+  .scene-body{ padding:12px; display:flex; flex-direction:column; gap:8px; }
+  .scene-time{ font-size:11.5px; color:var(--text-dim); font-family:"Space Grotesk",monospace; }
+  .scene-row{ display:flex; gap:8px; }
+  .cat-select{ flex:1.4; }
+  .score-input{ flex:.7; text-align:center; }
+  .text-input{ font-size:12.5px; }
+  .include-check{ display:flex; align-items:center; gap:7px; font-size:12px; }
+  .scene-error{ font-size:11px; color:var(--danger); }
+
+  /* chips */
+  .chip-row{ display:flex; gap:8px; flex-wrap:wrap; margin:12px 0 16px; }
+  .chip{
+    font-size:12.5px; padding:8px 14px; border-radius:999px; background:rgba(255,255,255,.05);
+    border:1px solid var(--panel-border); color:var(--text-dim); cursor:pointer; transition:.15s;
   }
-  .feature-icon svg{ width:22px; height:22px; }
-  .feature-card h3{ font-size:16.5px; margin:0 0 8px; font-weight:700; }
-  .feature-card p{ font-size:13.8px; color:var(--text-dim); line-height:1.75; margin:0; }
+  .chip:hover{ background:rgba(255,255,255,.1); color:var(--text); }
+  .reedit-row{ display:flex; gap:10px; }
+  .reedit-row input{ flex:1; }
+  .reedit-status{ font-size:12.5px; color:var(--accent3); margin-top:10px; min-height:1.4em; }
 
-  /* ---------- Steps ---------- */
-  .steps{ display:grid; grid-template-columns:repeat(4,1fr); gap:20px; counter-reset:step; }
-  .step{ position:relative; background:var(--panel); border:1px solid var(--panel-border); border-radius:20px; padding:30px 24px 26px; }
-  .step .num{
-    width:38px; height:38px; border-radius:11px; background:var(--grad); color:#08090f; font-weight:800;
-    display:flex; align-items:center; justify-content:center; margin-bottom:20px; font-size:15px;
+  /* pattern tabs */
+  .pattern-tabs{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:18px; }
+  .pattern-tab{
+    padding:9px 16px; border-radius:10px; background:var(--panel-2); border:1px solid var(--panel-border);
+    color:var(--text-dim); font-size:12.8px; font-weight:700; cursor:pointer;
   }
-  .step h3{ font-size:15.5px; margin:0 0 8px; }
-  .step p{ font-size:13.3px; color:var(--text-dim); line-height:1.7; margin:0; }
-  .step-arrow{ position:absolute; top:34px; right:-26px; color:var(--panel-border); z-index:2; }
-  .step-arrow svg{ width:20px; height:20px; }
+  .pattern-tab.active{ background:var(--grad); color:#08090f; border-color:transparent; }
 
-  /* ---------- Chat re-edit ---------- */
-  .chat-panel{
-    background:var(--panel); border:1px solid var(--panel-border); border-radius:24px; padding:30px;
-    max-width:520px; margin:0 auto;
-  }
-  .chat-msg{ display:flex; gap:12px; margin-bottom:18px; align-items:flex-start; }
-  .chat-msg.user{ flex-direction:row-reverse; }
-  .chat-avatar{ width:32px; height:32px; border-radius:50%; flex:none; display:flex; align-items:center; justify-content:center; font-size:14px; }
-  .chat-avatar.ai{ background:var(--grad); color:#08090f; }
-  .chat-avatar.user{ background:rgba(255,255,255,.1); }
-  .bubble{ padding:12px 16px; border-radius:16px; font-size:13.8px; line-height:1.65; max-width:78%; }
-  .bubble.ai{ background:rgba(255,255,255,.05); border:1px solid var(--panel-border); border-top-left-radius:4px; }
-  .bubble.user{ background:var(--grad); color:#08090f; font-weight:600; border-top-right-radius:4px; }
-  .chip-row{ display:flex; gap:8px; flex-wrap:wrap; margin-top:20px; }
-  .chip{ font-size:12.5px; padding:8px 14px; border-radius:999px; background:rgba(255,255,255,.05); border:1px solid var(--panel-border); color:var(--text-dim); }
+  /* preview */
+  .preview-layout{ display:grid; grid-template-columns:auto 1fr; gap:26px; align-items:start; }
+  .phone-frame{ width:230px; aspect-ratio:9/16; border-radius:26px; background:#000; border:5px solid #1c1e2b; position:relative; overflow:hidden; box-shadow:0 24px 50px -16px rgba(0,0,0,.6); }
+  .phone-frame video{ width:100%; height:100%; object-fit:cover; }
+  .overlay-layer{ position:absolute; inset:0; pointer-events:none; display:flex; flex-direction:column; justify-content:flex-end; padding:14px; }
+  .overlay-cat{ align-self:flex-start; font-size:10.5px; font-weight:700; padding:4px 9px; border-radius:999px; background:rgba(0,0,0,.55); color:#fff; margin-bottom:auto; }
+  .overlay-tag{ background:rgba(0,0,0,.55); border:1px solid rgba(255,255,255,.2); color:#fff; font-size:11px; padding:5px 9px; border-radius:8px; display:inline-block; margin-bottom:8px; align-self:flex-start; }
+  .overlay-caption{ color:#fff; font-size:12.5px; line-height:1.6; text-shadow:0 1px 6px rgba(0,0,0,.8); }
+  .preview-controls{ display:flex; gap:10px; margin-top:14px; justify-content:center; }
+  .preview-side{ flex:1; min-width:0; }
+  .platform-tabs{ display:flex; gap:8px; margin-bottom:16px; }
+  .platform-tab{ padding:8px 14px; border-radius:9px; background:var(--panel-2); border:1px solid var(--panel-border); color:var(--text-dim); font-size:12.5px; cursor:pointer; font-weight:700; }
+  .platform-tab.active{ background:rgba(124,92,255,.18); color:var(--text); border-color:var(--accent2); }
+  .timeline-strip{ display:flex; height:38px; border-radius:9px; overflow:hidden; background:var(--panel-2); border:1px solid var(--panel-border); }
+  .timeline-clip{ height:100%; cursor:pointer; border-right:1px solid rgba(0,0,0,.35); opacity:.9; transition:opacity .15s; }
+  .timeline-clip:hover{ opacity:1; }
+  .timeline-empty{ padding:10px; font-size:12.5px; color:var(--text-dim); }
+  .legend-row{ display:flex; gap:14px; flex-wrap:wrap; margin-top:10px; font-size:11.5px; color:var(--text-dim); }
+  .legend-item{ display:flex; align-items:center; gap:6px; }
+  .legend-dot{ width:9px; height:9px; border-radius:3px; }
 
-  /* ---------- Platform export ---------- */
-  .platform-row{ display:grid; grid-template-columns:repeat(3,1fr); gap:28px; }
-  .platform-card{ text-align:center; }
-  .p-phone{
-    width:100%; max-width:190px; margin:0 auto 20px; aspect-ratio:9/16; border-radius:22px;
-    border:5px solid #1c1e2b; overflow:hidden; position:relative; background:linear-gradient(160deg,#241a3a,#150f22 50%,#1a1226);
-  }
-  .p-phone .label{ position:absolute; top:10px; left:10px; right:10px; display:flex; justify-content:space-between; font-size:9px; color:rgba(255,255,255,.7); }
-  .p-phone .bars{ position:absolute; bottom:14px; left:14px; right:14px; height:3px; background:rgba(255,255,255,.15); border-radius:3px; overflow:hidden; }
-  .p-phone .bars i{ display:block; height:100%; width:62%; background:var(--grad); }
-  .platform-card h3{ font-size:15px; margin:0 0 6px; }
-  .platform-card p{ font-size:12.8px; color:var(--text-dim); margin:0; }
+  /* captions */
+  .caption-mode-tabs{ display:flex; gap:8px; margin-bottom:14px; }
+  .caption-panel{ display:none; }
+  .caption-panel.active{ display:block; }
+  .caption-list{ display:flex; flex-direction:column; gap:8px; margin-top:14px; max-height:260px; overflow-y:auto; padding-right:4px; }
+  .caption-row{ display:grid; grid-template-columns:70px 70px 1fr auto; gap:8px; align-items:center; background:var(--panel-2); border:1px solid var(--panel-border); border-radius:9px; padding:8px; }
+  .caption-row input[type=number]{ padding:6px; font-size:12px; }
+  .caption-row input[type=text]{ padding:6px; font-size:12.5px; }
+  .asr-hint{ font-size:12px; color:var(--text-dim); line-height:1.7; background:var(--panel-2); border:1px solid var(--panel-border); border-radius:10px; padding:12px 14px; margin-bottom:14px; }
+  .toggle-row{ display:flex; align-items:center; gap:8px; margin-top:12px; font-size:12.5px; color:var(--text-dim); }
 
-  /* ---------- Pricing ---------- */
-  .price-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:22px; align-items:stretch; }
-  .price-card{
-    background:var(--panel); border:1px solid var(--panel-border); border-radius:22px; padding:34px 28px;
-    display:flex; flex-direction:column;
-  }
-  .price-card.highlight{ border-color:var(--accent2); box-shadow:0 0 0 1px var(--accent2), 0 24px 60px -20px rgba(124,92,255,.35); position:relative; }
-  .price-badge{ position:absolute; top:-13px; left:50%; transform:translateX(-50%); background:var(--grad); color:#08090f; font-size:11.5px; font-weight:800; padding:5px 14px; border-radius:999px; }
-  .price-card h3{ font-size:17px; margin:0 0 6px; }
-  .price-card .plan-desc{ font-size:13px; color:var(--text-dim); margin:0 0 22px; }
-  .price-card .amount{ font-size:36px; font-weight:900; margin-bottom:2px; }
-  .price-card .amount span{ font-size:14px; color:var(--text-dim); font-weight:500; }
-  .price-card ul{ list-style:none; padding:0; margin:22px 0 28px; display:flex; flex-direction:column; gap:12px; flex:1; }
-  .price-card li{ font-size:13.5px; color:var(--text-dim); display:flex; gap:10px; align-items:flex-start; }
-  .price-card li svg{ width:16px; height:16px; color:var(--accent3); flex:none; margin-top:2px; }
+  /* export */
+  .export-row{ display:flex; gap:12px; flex-wrap:wrap; }
+  .export-note{ font-size:12.5px; color:var(--text-dim); margin-top:14px; line-height:1.8; background:var(--panel-2); border:1px solid var(--panel-border); border-radius:10px; padding:14px; }
 
-  /* ---------- FAQ ---------- */
-  .faq-list{ max-width:760px; margin:0 auto; display:flex; flex-direction:column; gap:12px; }
-  .faq-item{ background:var(--panel); border:1px solid var(--panel-border); border-radius:16px; overflow:hidden; }
-  .faq-q{ display:flex; align-items:center; justify-content:space-between; padding:20px 24px; cursor:pointer; font-size:14.8px; font-weight:700; gap:16px; }
-  .faq-q svg{ width:18px; height:18px; flex:none; color:var(--text-dim); transition:transform .2s ease; }
-  .faq-item.open .faq-q svg{ transform:rotate(45deg); }
-  .faq-a{ max-height:0; overflow:hidden; transition:max-height .25s ease; }
-  .faq-item.open .faq-a{ max-height:220px; }
-  .faq-a p{ margin:0; padding:0 24px 20px; font-size:13.8px; color:var(--text-dim); line-height:1.75; }
+  /* toast */
+  #toastContainer{ position:fixed; bottom:22px; left:50%; transform:translateX(-50%); z-index:200; display:flex; flex-direction:column; gap:8px; align-items:center; }
+  .toast{ background:#1c1e2b; border:1px solid var(--panel-border); color:var(--text); font-size:13px; padding:11px 18px; border-radius:10px; box-shadow:0 12px 30px -10px rgba(0,0,0,.6); animation:toast-in .2s ease; }
+  @keyframes toast-in{ from{ opacity:0; transform:translateY(10px);} to{ opacity:1; transform:translateY(0);} }
 
-  /* ---------- CTA banner ---------- */
-  .cta-banner{
-    border-radius:28px; padding:64px 48px; text-align:center; position:relative; overflow:hidden;
-    background:linear-gradient(135deg, rgba(255,77,141,.16), rgba(124,92,255,.18) 55%, rgba(53,212,199,.14));
-    border:1px solid var(--panel-border);
-  }
-  .cta-banner h2{ font-size:30px; margin:0 0 14px; font-weight:900; }
-  .cta-banner p{ color:var(--text-dim); font-size:15px; margin:0 0 30px; }
-  .cta-banner .hero-cta{ justify-content:center; }
+  footer{ border-top:1px solid var(--panel-border); padding:34px 0; text-align:center; }
+  footer p{ color:var(--text-dim); font-size:12.5px; margin:4px 0; }
 
-  /* ---------- Footer ---------- */
-  footer{ border-top:1px solid var(--panel-border); padding:56px 0 34px; }
-  .footer-top{ display:flex; justify-content:space-between; gap:40px; flex-wrap:wrap; margin-bottom:40px; }
-  .footer-brand p{ color:var(--text-dim); font-size:13.5px; max-width:280px; line-height:1.7; margin-top:14px; }
-  .footer-cols{ display:flex; gap:60px; flex-wrap:wrap; }
-  .footer-col h4{ font-size:13px; color:var(--text-dim); margin:0 0 16px; font-weight:700; letter-spacing:.04em; }
-  .footer-col a{ display:block; font-size:13.8px; color:var(--text); opacity:.8; margin-bottom:12px; }
-  .footer-col a:hover{ opacity:1; }
-  .footer-bottom{ border-top:1px solid var(--panel-border); padding-top:24px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:12px; font-size:12.5px; color:var(--text-dim); }
-
-  .reveal{ opacity:0; transform:translateY(18px); transition:opacity .6s ease, transform .6s ease; }
-  .reveal.show{ opacity:1; transform:translateY(0); }
-
-  @media (max-width: 920px){
-    nav.links{ display:none; }
-    .burger{ display:flex; }
-    .hero-grid{ grid-template-columns:1fr; }
-    .phone-stage{ order:-1; margin-bottom:20px; }
-    h1.hero-title{ font-size:34px; }
-    .feature-grid{ grid-template-columns:repeat(2,1fr); }
-    .steps{ grid-template-columns:repeat(2,1fr); }
-    .step-arrow{ display:none; }
-    .platform-row{ grid-template-columns:1fr; max-width:260px; margin:0 auto; }
-    .price-grid{ grid-template-columns:1fr; }
-    .strip .wrap{ gap:24px; }
-  }
-  @media (max-width: 560px){
-    .feature-grid{ grid-template-columns:1fr; }
-    .steps{ grid-template-columns:1fr; }
-    section{ padding:72px 0; }
-    h2.section-title{ font-size:26px; }
-    .cta-banner{ padding:44px 24px; }
-    .float-1, .float-2{ display:none; }
+  @media (max-width: 860px){
+    .upload-grid{ grid-template-columns:1fr; }
+    .preview-layout{ grid-template-columns:1fr; }
+    .phone-frame{ margin:0 auto; }
+    .scene-grid{ grid-template-columns:repeat(auto-fill, minmax(160px,1fr)); }
   }
 </style>
 </head>
 <body>
 
-<!-- ================= HEADER ================= -->
 <header class="site">
   <div class="wrap nav-row">
-    <a href="#top" class="logo"><span class="mark">🎬</span>ReelCraft <span class="grad-text">AI</span></a>
-    <nav class="links">
-      <a href="#features">機能</a>
-      <a href="#how">使い方</a>
-      <a href="#platforms">対応SNS</a>
-      <a href="#pricing">料金</a>
-      <a href="#faq">よくある質問</a>
-    </nav>
-    <div class="nav-actions">
-      <a href="#pricing" class="btn btn-ghost" style="padding:11px 20px; font-size:14px;">料金を見る</a>
-      <a href="#cta" class="btn btn-primary" style="padding:11px 22px; font-size:14px;">無料で試す</a>
-      <div class="burger" id="burger"><span></span></div>
-    </div>
+    <a href="#top" class="logo"><span class="mark">🎬</span>ReelCraft <span class="grad-text">AI</span> Studio</a>
+    <span class="beta-badge">個人利用 / ブラウザ内で動作</span>
+    <div style="flex:1"></div>
+    <button class="btn btn-ghost btn-sm" id="settingsBtn">⚙️ APIキー設定</button>
   </div>
-  <div id="mobile-menu">
-    <div class="wrap">
-      <a href="#features">機能</a>
-      <a href="#how">使い方</a>
-      <a href="#platforms">対応SNS</a>
-      <a href="#pricing">料金</a>
-      <a href="#faq">よくある質問</a>
+  <div class="settings-panel" id="settingsPanel">
+    <h3>Claude API 設定</h3>
+    <p class="hint">シーンのAI判定と「一言で再編集」機能に、あなた自身のAnthropic APIキーを使用します。キーはこのブラウザの localStorage にのみ保存され、外部には送信されません（判定時のみ Anthropic のAPIへ直接送信されます）。API利用には Anthropic 側の料金が発生します。</p>
+    <div class="field">
+      <span class="field-label">Anthropic API キー</span>
+      <input type="text" id="apiKeyInput" placeholder="sk-ant-...">
     </div>
+    <div class="field">
+      <span class="field-label">使用モデル</span>
+      <select id="modelSelect">
+        <option value="claude-haiku-4-5-20251001">Haiku 4.5（高速・低コスト・推奨）</option>
+        <option value="claude-sonnet-5">Sonnet 5（バランス）</option>
+        <option value="claude-opus-5">Opus 5（高精度）</option>
+      </select>
+    </div>
+    <button class="btn btn-primary btn-sm" style="width:100%" id="saveSettingsBtn">保存する</button>
   </div>
 </header>
 
-<!-- ================= HERO ================= -->
-<section id="top" class="hero">
-  <div class="hero-glow"></div>
-  <div class="wrap hero-grid">
-    <div>
-      <div class="eyebrow"><span class="dot"></span>飲食店・店舗のための AI動画編集</div>
-      <h1 class="hero-title">動画をアップロードするだけ。<br>AIが<span class="grad-text">「バズるリール」</span>を<br>自動で作る。</h1>
-      <p class="hero-sub">料理・外観・店内・スタッフをAIが自動で判定し、良い瞬間だけを抽出。字幕・商品情報・BGMカットまで自動編集して、Instagram / TikTok / Shorts に最適化したリールを複数パターン一度に生成します。</p>
-      <div class="hero-cta">
-        <a href="#cta" class="btn btn-primary">無料でリールを作ってみる</a>
-        <a href="#how" class="btn btn-ghost">使い方を見る</a>
-      </div>
-      <div class="hero-note">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>
-        動画編集の経験・専門スキルは不要です
-      </div>
+<main>
+  <div class="wrap" id="top">
+    <div class="intro">
+      <div class="eyebrow"><span class="dot"></span>個人利用向け・動画作成まで一貫サポート</div>
+      <h1>動画をアップロードして、<span class="grad-text">AIと一緒にリールを編集</span>する。</h1>
+      <p>お手持ちの動画をアップロードすると、シーン分割・AIによるカテゴリ判定・良い瞬間の抽出・BGMのビート同期・一言指示での再編集までをブラウザ内で行い、SNS投稿用の編集タイムラインとプレビューを作成します。最終的な動画ファイルの書き出しは簡易版（編集データ / 字幕データの書き出し）です。</p>
     </div>
 
-    <div class="phone-stage">
-      <div class="float-card float-1">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20v-6M6 20V10M18 20V4"/></svg>
-        BGMのビートに合わせて自動カット
+    <!-- STEP 1: upload -->
+    <section class="step-card">
+      <div class="step-head">
+        <div class="step-num">1</div>
+        <div>
+          <h2>動画をアップロード</h2>
+          <div class="step-sub">お店の動画（料理・外観・店内・スタッフなど）と、任意でBGM音源を追加できます。</div>
+        </div>
       </div>
-      <div class="phone">
-        <div class="notch"></div>
-        <div class="screen">
-          <div class="reel-scene">
-            <div class="reel-sidebar">
-              <div class="ic">❤️</div>
-              <div class="ic">💬</div>
-              <div class="ic">↗️</div>
-            </div>
-            <div class="reel-caption">
-              <span class="tag">AI自動生成 ・ Reels版</span>
-              <div class="cap-text">"香ばしい炭火焼きの香りが店内いっぱいに…"</div>
-              <div class="price-chip">🍽️ 炭火焼きランチ ¥1,280</div>
+
+      <div class="upload-grid">
+        <div>
+          <div class="dropzone" id="videoDropzone">
+            <div class="dz-icon">🎞️</div>
+            <div class="dz-text">クリックまたはドラッグ&ドロップで動画を選択（mp4 / mov など）</div>
+            <input type="file" id="videoInput" accept="video/*" hidden>
+          </div>
+          <div class="video-preview-wrap" id="videoPreviewWrap" style="display:none; margin-top:14px;">
+            <video id="previewSourceVideo" controls playsinline muted></video>
+          </div>
+          <div class="meta-row" id="metaRow"></div>
+        </div>
+
+        <div class="bgm-box">
+          <h3>🎵 BGM（任意）</h3>
+          <button class="btn btn-ghost btn-sm" id="bgmPickBtn" style="width:100%">音声ファイルを選択</button>
+          <input type="file" id="bgmInput" accept="audio/*" hidden>
+          <div class="bgm-name" id="bgmName">未選択（BGMを追加するとビートに合わせたカットを行います）</div>
+        </div>
+      </div>
+
+      <div style="margin-top:20px; display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+        <button class="btn btn-primary" id="analyzeBtn" disabled>🔍 解析を開始する</button>
+        <span style="font-size:12px; color:var(--text-dim);">APIキー未設定でもシーン分割までは実行できます（カテゴリ判定は手動になります）。</span>
+      </div>
+
+      <div class="progress-wrap" id="progressWrap" hidden>
+        <div class="progress-label" id="progressLabel">処理中…</div>
+        <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+      </div>
+    </section>
+
+    <!-- STEP 2: scenes -->
+    <section class="step-card" id="sceneSection" hidden>
+      <div class="step-head">
+        <div class="step-num">2</div>
+        <div>
+          <h2>検出されたシーン</h2>
+          <div class="step-sub">カテゴリ・スコア・キャッチコピー・テロップはすべて編集できます。「採用する」で使うシーンを選べます。</div>
+        </div>
+      </div>
+      <div class="scene-grid" id="sceneGrid"></div>
+    </section>
+
+    <!-- STEP 3: one-line re-edit -->
+    <section class="step-card" id="reeditSection" hidden>
+      <div class="step-head">
+        <div class="step-num">3</div>
+        <div>
+          <h2>一言で再編集</h2>
+          <div class="step-sub">伝えたいトーンを一言で指示すると、AIがシーン選定・カット速度・色味を調整した「カスタム」パターンを作ります。</div>
+        </div>
+      </div>
+      <div class="chip-row" id="reeditChips">
+        <span class="chip" data-text="もっと高級感のある雰囲気にして">もっと高級感に</span>
+        <span class="chip" data-text="料理のシーンを中心にもっと大きく見せて">料理を大きく</span>
+        <span class="chip" data-text="若者向けにテンポよく編集して">若者向けに</span>
+        <span class="chip" data-text="カットのテンポをもっと速くして">テンポを速く</span>
+      </div>
+      <div class="reedit-row">
+        <input type="text" id="reeditInput" placeholder="例: もっと高級感が出るように編集して">
+        <button class="btn btn-primary" id="reeditBtn">再編集する</button>
+      </div>
+      <div class="reedit-status" id="reeditStatus"></div>
+
+      <div style="margin-top:22px;">
+        <div class="step-sub" style="margin-bottom:10px;">パターン</div>
+        <div class="pattern-tabs" id="patternTabs"></div>
+      </div>
+    </section>
+
+    <!-- STEP 4: preview -->
+    <section class="step-card" id="previewSection" hidden>
+      <div class="step-head">
+        <div class="step-num">4</div>
+        <div>
+          <h2>プレビュー & SNS別最適化</h2>
+          <div class="step-sub">Instagram Reels / TikTok / YouTube Shorts それぞれに合わせた目標尺でタイムラインを組み替えます。</div>
+        </div>
+      </div>
+
+      <div class="platform-tabs" id="platformTabs">
+        <button class="platform-tab active" data-platform="reels">Instagram Reels（約22秒）</button>
+        <button class="platform-tab" data-platform="tiktok">TikTok（約16秒）</button>
+        <button class="platform-tab" data-platform="shorts">YouTube Shorts（約28秒）</button>
+      </div>
+
+      <div class="preview-layout">
+        <div>
+          <div class="phone-frame">
+            <video id="previewVideo" playsinline></video>
+            <div class="overlay-layer">
+              <div class="overlay-cat" id="overlayCategoryBadge"></div>
+              <div>
+                <span class="overlay-tag" id="overlayTagText" style="display:none;"></span>
+                <div class="overlay-caption" id="overlayCaptionText"></div>
+              </div>
             </div>
           </div>
+          <div class="preview-controls">
+            <button class="btn btn-ghost btn-sm" id="playBtn">▶ 再生</button>
+            <button class="btn btn-ghost btn-sm" id="pauseBtn">⏸ 一時停止</button>
+          </div>
+        </div>
+        <div class="preview-side">
+          <div class="step-sub" style="margin-bottom:10px;">編集タイムライン（クリックでその位置へ）</div>
+          <div class="timeline-strip" id="timelineStrip"><div class="timeline-empty">まだ編集内容がありません</div></div>
+          <div class="legend-row" id="legendRow"></div>
         </div>
       </div>
-      <div class="float-card float-2">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
-        字幕・商品名を自動表示
-      </div>
-    </div>
-  </div>
-</section>
+    </section>
 
-<!-- ================= PLATFORM STRIP ================= -->
-<div class="strip">
-  <div class="wrap">
-    <div class="item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1"/></svg>Instagram Reels</div>
-    <div class="item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 3v10.5a3.5 3.5 0 1 1-3.5-3.5"/><path d="M16 8c1.5 1.2 3 1.5 4 1.5V6c-1 0-2.3-.6-3-1.6"/></svg>TikTok</div>
-    <div class="item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9l5 3-5 3z"/></svg>YouTube Shorts</div>
-  </div>
-</div>
-
-<!-- ================= FEATURES ================= -->
-<section id="features">
-  <div class="wrap">
-    <div class="section-head reveal">
-      <div class="section-kicker">Features</div>
-      <h2 class="section-title">「撮っただけの動画」を<br>投稿できるリールに変える9つの機能</h2>
-      <p class="section-desc">AIが映像・音声を理解して編集するから、素材を眺めて切り貼りする時間がゼロになります。</p>
-    </div>
-
-    <div class="feature-grid">
-      <div class="feature-card reveal">
-        <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="15" height="14" rx="2"/><path d="M17 9l5-3v12l-5-3"/></svg></div>
-        <h3>動画の中身をAIが解析</h3>
-        <p>アップロードした動画をAIが自動で読み込み、シーンごとの構成・映り・音声を丸ごと解析します。</p>
-      </div>
-      <div class="feature-card reveal">
-        <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5L18 18M18 6l-2.5 2.5M8.5 15.5L6 18"/><circle cx="12" cy="12" r="3"/></svg></div>
-        <h3>被写体を自動で判定</h3>
-        <p>「料理」「外観」「店内」「スタッフ」などを映像から自動で判定し、シーンごとにタグ付けします。</p>
-      </div>
-      <div class="feature-card reveal">
-        <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.4 7.2H22l-6 4.4 2.3 7.1L12 16.3l-6.3 4.4L8 13.6 2 9.2h7.6z"/></svg></div>
-        <h3>良い瞬間だけを自動抽出</h3>
-        <p>ブレ・空白・単調なカットを除き、思わず見入る瞬間だけを選んでハイライト化します。</p>
-      </div>
-      <div class="feature-card reveal">
-        <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a4 4 0 0 1 4 4v6a4 4 0 1 1-8 0V5a4 4 0 0 1 4-4z"/><path d="M5 10v1a7 7 0 0 0 14 0v-1M12 18v4"/></svg></div>
-        <h3>音声から字幕を自動生成</h3>
-        <p>話している内容を自動で文字起こしし、読みやすい字幕として動画に自動配置します。</p>
-      </div>
-      <div class="feature-card reveal">
-        <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18M3 12h18M3 17h11"/><circle cx="19" cy="17" r="2"/></svg></div>
-        <h3>商品名・価格・特典を自動表示</h3>
-        <p>映っている商品やキャンペーン情報をテロップとして自動配置。伝え忘れがなくなります。</p>
-      </div>
-      <div class="feature-card reveal">
-        <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h2v6H4zM9 6h2v12H9zM14 9h2v9h-2zM19 3h2v15h-2z"/></svg></div>
-        <h3>BGMのビートに合わせてカット</h3>
-        <p>選んだ楽曲のリズムを解析し、ビートに合わせて自動でカット割りを作ります。</p>
-      </div>
-      <div class="feature-card reveal">
-        <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="7" y="2" width="10" height="20" rx="3"/><path d="M11 18h2"/></svg></div>
-        <h3>SNS別に自動最適化</h3>
-        <p>Instagram・TikTok・Shorts、それぞれの縦横比・尺・トレンドに合わせて自動書き出し。</p>
-      </div>
-      <div class="feature-card reveal">
-        <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.4 8.4 0 0 1-8.9 8.5 8.5 8.5 0 0 1-4.3-1.1L3 20l1.2-4.6A8.4 8.4 0 0 1 12.6 3a8.4 8.4 0 0 1 8.4 8.5z"/></svg></div>
-        <h3>一言だけで再編集</h3>
-        <p>「もっと高級感に」「料理を大きく」「若者向けに」と伝えるだけで、AIがトーンを再編集します。</p>
-      </div>
-      <div class="feature-card reveal">
-        <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></div>
-        <h3>複数パターンを同時生成</h3>
-        <p>1本の素材から、テイストの異なる完成リールを何パターンも自動で作り分けます。</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ================= HOW IT WORKS ================= -->
-<section id="how" style="background:var(--bg-soft); border-top:1px solid var(--panel-border); border-bottom:1px solid var(--panel-border);">
-  <div class="wrap">
-    <div class="section-head reveal">
-      <div class="section-kicker">How it works</div>
-      <h2 class="section-title">4ステップで、投稿までが終わる</h2>
-      <p class="section-desc">編集ソフトを開く必要はありません。すべてブラウザの中で完結します。</p>
-    </div>
-
-    <div class="steps">
-      <div class="step reveal">
-        <div class="num">01</div>
-        <h3>動画をアップロード</h3>
-        <p>スマホで撮った素材をそのままアップロードするだけ。長さや画質は問いません。</p>
-        <div class="step-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
-      </div>
-      <div class="step reveal">
-        <div class="num">02</div>
-        <h3>AIが映像を解析</h3>
-        <p>料理・外観・店内・スタッフを判定し、良い瞬間だけを自動でピックアップします。</p>
-        <div class="step-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
-      </div>
-      <div class="step reveal">
-        <div class="num">03</div>
-        <h3>字幕・情報・BGMを自動追加</h3>
-        <p>字幕、商品名や価格、キャンペーン情報、ビート同期のカットまで自動で仕上げます。</p>
-        <div class="step-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
-      </div>
-      <div class="step reveal">
-        <div class="num">04</div>
-        <h3>複数パターンを書き出し</h3>
-        <p>Instagram / TikTok / Shorts向けに最適化した完成リールを、複数パターン同時に生成。</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ================= CHAT RE-EDIT ================= -->
-<section>
-  <div class="wrap hero-grid" style="align-items:center;">
-    <div class="reveal">
-      <div class="section-kicker">One-line editing</div>
-      <h2 class="section-title">「もっと高級感に」<br>その一言で、AIが編集し直す。</h2>
-      <p class="section-desc" style="margin-bottom:28px;">専門用語も操作も不要。伝えたいトーンを話しかけるだけで、色味・カット・BGM・テロップをAIが自動で調整します。</p>
-      <div class="chip-row">
-        <span class="chip">もっと高級感に</span>
-        <span class="chip">料理を大きく</span>
-        <span class="chip">若者向けに</span>
-        <span class="chip">テンポを速く</span>
-      </div>
-    </div>
-
-    <div class="chat-panel reveal">
-      <div class="chat-msg user">
-        <div class="chat-avatar user">🧑</div>
-        <div class="bubble user">もっと高級感が出るように編集して</div>
-      </div>
-      <div class="chat-msg">
-        <div class="chat-avatar ai">🎬</div>
-        <div class="bubble ai">色味を落ち着いたトーンに変更し、BGMをアップテンポからジャズ系に変更しました。カットの間も少し長めに調整しています。</div>
-      </div>
-      <div class="chat-msg user">
-        <div class="chat-avatar user">🧑</div>
-        <div class="bubble user">料理のカットをもっと大きく見せて</div>
-      </div>
-      <div class="chat-msg">
-        <div class="chat-avatar ai">🎬</div>
-        <div class="bubble ai">料理シーンをズームで強調し、盛り付けのアップカットを追加しました。3パターン生成しています。</div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ================= PLATFORMS ================= -->
-<section id="platforms" style="background:var(--bg-soft); border-top:1px solid var(--panel-border); border-bottom:1px solid var(--panel-border);">
-  <div class="wrap">
-    <div class="section-head reveal">
-      <div class="section-kicker">Multi-platform export</div>
-      <h2 class="section-title">SNSごとの「正解の形」に自動で合わせる</h2>
-      <p class="section-desc">縦横比・尺・字幕の見せ方まで、プラットフォームごとの最適解に自動書き出しします。</p>
-    </div>
-
-    <div class="platform-row">
-      <div class="platform-card reveal">
-        <div class="p-phone">
-          <div class="label"><span>Reels</span><span>0:24</span></div>
-          <div class="bars"><i></i></div>
+    <!-- STEP 5: captions -->
+    <section class="step-card" id="captionSection" hidden>
+      <div class="step-head">
+        <div class="step-num">5</div>
+        <div>
+          <h2>字幕</h2>
+          <div class="step-sub">音声から自動生成、または文章を貼り付けて自動でタイミングを割り振れます。</div>
         </div>
-        <h3>Instagram Reels</h3>
-        <p>9:16・最大90秒目安 / トレンド音源に合わせたテンポ編集</p>
       </div>
-      <div class="platform-card reveal">
-        <div class="p-phone">
-          <div class="label"><span>TikTok</span><span>0:18</span></div>
-          <div class="bars"><i style="width:80%"></i></div>
+
+      <div class="caption-mode-tabs">
+        <button class="btn btn-ghost btn-sm caption-mode-btn active" data-mode="manual">✍️ 文章から自動生成</button>
+        <button class="btn btn-ghost btn-sm caption-mode-btn" data-mode="asr">🎙 音声認識で自動生成（実験的）</button>
+      </div>
+
+      <div class="caption-panel active" id="captionPanelManual">
+        <textarea id="transcriptInput" placeholder="動画のセリフ・ナレーションをここに貼り付けてください。句点や改行で区切って字幕タイミングを自動配分します。"></textarea>
+        <div style="margin-top:10px;">
+          <button class="btn btn-primary btn-sm" id="splitCaptionsBtn">現在のパターンの尺に合わせて字幕を生成</button>
         </div>
-        <h3>TikTok</h3>
-        <p>9:16・スピード感のあるカットとテキストで冒頭2秒を強化</p>
       </div>
-      <div class="platform-card reveal">
-        <div class="p-phone">
-          <div class="label"><span>Shorts</span><span>0:31</span></div>
-          <div class="bars"><i style="width:44%"></i></div>
+
+      <div class="caption-panel" id="captionPanelAsr">
+        <div class="asr-hint">
+          ブラウザの音声認識(Web Speech API)を使い、動画を再生しながらリアルタイムに文字起こしします。<strong>Chromeでのみ動作</strong>し、マイクの許可が必要です。動画の音声をスピーカーで再生し、それをマイクが拾う方式のため、周囲が静かな環境での利用と、精度は環境に依存する点にご注意ください。うまくいかない場合は「文章から自動生成」をご利用ください。
         </div>
-        <h3>YouTube Shorts</h3>
-        <p>9:16・検索に強いタイトル/字幕設計で流入を最大化</p>
+        <button class="btn btn-primary btn-sm" id="asrStartBtn">🎙 音声認識を開始</button>
+        <button class="btn btn-ghost btn-sm" id="asrStopBtn" disabled>■ 停止</button>
       </div>
-    </div>
+
+      <div class="caption-list" id="captionList"></div>
+      <div style="margin-top:10px;">
+        <button class="btn btn-ghost btn-sm" id="addCaptionBtn">＋ 字幕行を追加</button>
+      </div>
+      <div class="toggle-row">
+        <input type="checkbox" id="showCaptionsToggle" checked>
+        <label for="showCaptionsToggle">プレビューに字幕を重ねて表示する</label>
+      </div>
+    </section>
+
+    <!-- STEP 6: export -->
+    <section class="step-card" id="exportSection" hidden>
+      <div class="step-head">
+        <div class="step-num">6</div>
+        <div>
+          <h2>書き出し</h2>
+          <div class="step-sub">現在選択中のパターンの編集データと字幕を書き出します。</div>
+        </div>
+      </div>
+      <div class="export-row">
+        <button class="btn btn-primary" id="exportJsonBtn">編集データ(JSON)をダウンロード</button>
+        <button class="btn btn-ghost" id="exportSrtBtn">字幕(SRT)をダウンロード</button>
+      </div>
+      <div class="export-note">
+        このツールは編集タイムラインとプレビューまでを自動生成する簡易版です。最終的な1本のMP4動画として書き出す機能は含まれていません。書き出したJSON（カット位置・カテゴリ・キャッチコピー・テロップ）とSRT字幕ファイルを CapCut / Premiere / DaVinci Resolve などの編集ソフトに読み込んで仕上げるか、このプレビュー画面を画面録画する方法でご利用ください。
+      </div>
+    </section>
   </div>
-</section>
+</main>
 
-<!-- ================= PRICING ================= -->
-<section id="pricing">
-  <div class="wrap">
-    <div class="section-head reveal">
-      <div class="section-kicker">Pricing</div>
-      <h2 class="section-title">シンプルな料金プラン</h2>
-      <p class="section-desc">まずは無料で1本作成。合わなければいつでも解約できます。</p>
-    </div>
-
-    <div class="price-grid">
-      <div class="price-card reveal">
-        <h3>Starter</h3>
-        <p class="plan-desc">まずは試したい個人店舗向け</p>
-        <div class="amount">¥0<span> / 月</span></div>
-        <ul>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>月3本まで自動生成</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>字幕・BGM自動編集</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>SNS 1媒体向け書き出し</li>
-        </ul>
-        <a href="#cta" class="btn btn-ghost btn-block">無料で始める</a>
-      </div>
-
-      <div class="price-card highlight reveal">
-        <div class="price-badge">人気プラン</div>
-        <h3>Business</h3>
-        <p class="plan-desc">複数店舗・毎週投稿する店舗向け</p>
-        <div class="amount">¥9,800<span> / 月</span></div>
-        <ul>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>月30本まで自動生成</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>一言指示による再編集</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>Instagram / TikTok / Shorts 同時書き出し</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>商品名・価格の自動テロップ</li>
-        </ul>
-        <a href="#cta" class="btn btn-primary btn-block">Businessで始める</a>
-      </div>
-
-      <div class="price-card reveal">
-        <h3>Pro</h3>
-        <p class="plan-desc">チェーン展開・代理店向け</p>
-        <div class="amount">お問い合わせ</div>
-        <ul>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>生成本数の上限なし</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>複数店舗・複数アカウント管理</li>
-          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>専任担当によるオンボーディング</li>
-        </ul>
-        <a href="#cta" class="btn btn-ghost btn-block">相談する</a>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ================= FAQ ================= -->
-<section id="faq" style="background:var(--bg-soft); border-top:1px solid var(--panel-border); border-bottom:1px solid var(--panel-border);">
-  <div class="wrap">
-    <div class="section-head reveal">
-      <div class="section-kicker">FAQ</div>
-      <h2 class="section-title">よくある質問</h2>
-    </div>
-    <div class="faq-list">
-      <div class="faq-item reveal">
-        <div class="faq-q">動画編集の知識がなくても使えますか？<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></div>
-        <div class="faq-a"><p>はい。動画をアップロードするだけで、シーン判定から字幕・BGM同期・SNS別の書き出しまでAIが自動で行うため、編集経験は必要ありません。</p></div>
-      </div>
-      <div class="faq-item reveal">
-        <div class="faq-q">「一言で再編集」とはどういう機能ですか？<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></div>
-        <div class="faq-a"><p>「もっと高級感に」「料理を大きく」「若者向けに」といった一言の指示を伝えるだけで、色味・カット割り・BGM・テロップをAIが自動で調整して再生成します。</p></div>
-      </div>
-      <div class="faq-item reveal">
-        <div class="faq-q">どのSNSに対応していますか？<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></div>
-        <div class="faq-a"><p>Instagram Reels、TikTok、YouTube Shortsに対応しており、それぞれの縦横比・尺・トレンドに合わせて最適化された形式で書き出せます。</p></div>
-      </div>
-      <div class="faq-item reveal">
-        <div class="faq-q">1本の動画から何パターン作れますか？<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></div>
-        <div class="faq-a"><p>1本の素材からテイストの異なる完成リールを複数パターン自動生成できます。生成本数はプランによって異なります。</p></div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ================= CTA ================= -->
-<section id="cta">
-  <div class="wrap">
-    <div class="cta-banner reveal">
-      <h2>次に撮る動画から、<span class="grad-text">投稿の悩み</span>をなくす。</h2>
-      <p>まずは無料で1本、あなたのお店の動画をリールに変えてみましょう。</p>
-      <div class="hero-cta">
-        <a href="#" class="btn btn-primary">無料でリールを作ってみる</a>
-        <a href="#pricing" class="btn btn-ghost">料金プランを見る</a>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ================= FOOTER ================= -->
 <footer>
   <div class="wrap">
-    <div class="footer-top">
-      <div class="footer-brand">
-        <a href="#top" class="logo"><span class="mark">🎬</span>ReelCraft <span class="grad-text">AI</span></a>
-        <p>お店の動画をAIが解析し、Instagram / TikTok / Shorts向けのリールを自動で作る編集サービス。</p>
-      </div>
-      <div class="footer-cols">
-        <div class="footer-col">
-          <h4>サービス</h4>
-          <a href="#features">機能</a>
-          <a href="#how">使い方</a>
-          <a href="#platforms">対応SNS</a>
-          <a href="#pricing">料金</a>
-        </div>
-        <div class="footer-col">
-          <h4>サポート</h4>
-          <a href="#faq">よくある質問</a>
-          <a href="#cta">お問い合わせ</a>
-        </div>
-      </div>
-    </div>
-    <div class="footer-bottom">
-      <span>© 2026 ReelCraft AI. All rights reserved.</span>
-      <span>本ページはサービス紹介用のデモLPです。</span>
-    </div>
+    <p>ReelCraft AI Studio — 個人利用向けの動画編集支援ツールです。動画・音声ファイルは外部サーバーに送信されず、ブラウザ内で処理されます（シーン画像のみ、AI判定時にあなたのAPIキーでAnthropicへ送信されます）。</p>
+    <p>© 2026 ReelCraft AI Studio</p>
   </div>
 </footer>
 
-<script>
-  // Mobile menu
-  const burger = document.getElementById('burger');
-  const mobileMenu = document.getElementById('mobile-menu');
-  burger.addEventListener('click', () => {
-    mobileMenu.classList.toggle('open');
-  });
-  mobileMenu.querySelectorAll('a').forEach(a => a.addEventListener('click', () => mobileMenu.classList.remove('open')));
+<div id="toastContainer"></div>
 
-  // Scroll reveal
-  const revealEls = document.querySelectorAll('.reveal');
-  const io = new IntersectionObserver((entries) => {
-    entries.forEach(entry => {
-      if (entry.isIntersecting) {
-        entry.target.classList.add('show');
-        io.unobserve(entry.target);
+<script>
+(function(){
+  'use strict';
+
+  /* ============================================================
+     定数
+     ============================================================ */
+  var CATEGORY_LABELS = ['料理','外観','店内','スタッフ','その他'];
+  var CATEGORY_COLORS = { '料理':'#ff8a5c','外観':'#5cc8ff','店内':'#c58bff','スタッフ':'#8effc0','その他':'#9498ab' };
+  var ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
+
+  var PLATFORM_PRESETS = {
+    reels:  { label:'Instagram Reels', targetSec: 22 },
+    tiktok: { label:'TikTok',          targetSec: 16 },
+    shorts: { label:'YouTube Shorts',  targetSec: 28 },
+  };
+
+  var PATTERN_DEFS = [
+    { key:'standard', name:'標準',           weights:{'料理':1,   '外観':1,   '店内':1,   'スタッフ':1,   'その他':0.6}, cutStyle:'normal', colorGrade:'neutral' },
+    { key:'luxury',   name:'高級感',         weights:{'料理':1.6, '外観':1.1, '店内':1.4, 'スタッフ':0.6, 'その他':0.3}, cutStyle:'slow',   colorGrade:'warm'    },
+    { key:'youth',    name:'若者向け・テンポ重視', weights:{'料理':1.2, '外観':0.8, '店内':0.8, 'スタッフ':1.5, 'その他':0.6}, cutStyle:'fast',   colorGrade:'vivid'   },
+  ];
+
+  var COLOR_GRADE_FILTERS = {
+    neutral: 'none',
+    warm:    'sepia(0.18) saturate(1.25) contrast(1.05) brightness(1.02)',
+    cool:    'hue-rotate(180deg) saturate(0.9) contrast(1.05)',
+    muted:   'saturate(0.55) contrast(0.95)',
+    vivid:   'saturate(1.5) contrast(1.15)',
+  };
+
+  var CLASSIFY_PROMPT = 'この画像は飲食店・店舗のPR動画の1シーンです。次のJSON形式のみで、日本語で回答してください。説明文やコードブロックは不要です。\n' +
+    '{"category":"料理 or 外観 or 店内 or スタッフ or その他 のいずれか1つ","score":SNSのリールに使いたくなる魅力度を1〜10の整数で,"caption":"15文字以内の短いキャッチコピー","overlay":"画面に写っている商品名や特徴を10文字以内で推測した文字列（分からなければ空文字）"}';
+
+  /* ============================================================
+     状態
+     ============================================================ */
+  var state = {
+    apiKey: localStorage.getItem('reelcraft_api_key') || '',
+    model: localStorage.getItem('reelcraft_model') || 'claude-haiku-4-5-20251001',
+    video: null,       // { file, url, duration, width, height }
+    scenes: [],        // { id, start, end, thumb, category, score, caption, overlay, include, analyzeError }
+    bgm: null,         // { file, beats:[...] }
+    captionCues: [],   // { start, end, text }
+    patterns: [],
+    customPattern: null,
+    activePatternKey: 'standard',
+    platform: 'reels',
+    captionMode: 'manual',
+  };
+
+  var asrRecognizer = null;
+  var stopPlaybackFn = null;
+
+  /* ============================================================
+     ユーティリティ
+     ============================================================ */
+  function $(id){ return document.getElementById(id); }
+  function escapeAttr(s){ return String(s == null ? '' : s).replace(/"/g,'&quot;'); }
+  function clamp(n,min,max){ return Math.max(min, Math.min(max, n)); }
+
+  function fmtTime(sec){
+    sec = Math.max(0, Math.round(sec || 0));
+    var m = Math.floor(sec/60), s = sec%60;
+    return m + ':' + String(s).padStart(2,'0');
+  }
+
+  function srtTime(sec){
+    sec = Math.max(0, sec || 0);
+    var h = Math.floor(sec/3600);
+    var m = Math.floor((sec%3600)/60);
+    var s = Math.floor(sec%60);
+    var ms = Math.round((sec - Math.floor(sec))*1000);
+    function pad(n,l){ l=l||2; return String(n).padStart(l,'0'); }
+    return pad(h)+':'+pad(m)+':'+pad(s)+','+pad(ms,3);
+  }
+
+  function downloadBlob(filename, content, mime){
+    var blob = new Blob([content], { type: mime });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
+  }
+
+  function toast(msg){
+    var el = document.createElement('div');
+    el.className = 'toast';
+    el.textContent = msg;
+    $('toastContainer').appendChild(el);
+    setTimeout(function(){ el.remove(); }, 4200);
+  }
+
+  function extractJson(text){
+    var match = text.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error('AIの応答からJSONを取得できませんでした');
+    return JSON.parse(match[0]);
+  }
+
+  function anthropicHeaders(apiKey){
+    return {
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+      'content-type': 'application/json',
+    };
+  }
+
+  /* ============================================================
+     動画: シーン分割（フレーム差分によるカット検出）
+     ============================================================ */
+  function seekTo(videoEl, t){
+    return new Promise(function(resolve){
+      function onSeeked(){ videoEl.removeEventListener('seeked', onSeeked); resolve(); }
+      videoEl.addEventListener('seeked', onSeeked);
+      videoEl.currentTime = t;
+    });
+  }
+
+  function detectScenes(videoEl, onProgress){
+    return new Promise(function(resolve, reject){
+      (async function(){
+        try {
+          var duration = videoEl.duration;
+          if (!duration || !isFinite(duration)) throw new Error('動画の長さを取得できませんでした');
+
+          var sampleCount = clamp(Math.round(duration * 2), 16, 140);
+          var step = duration / sampleCount;
+          var cw = 64, ch = 36;
+          var canvas = document.createElement('canvas');
+          canvas.width = cw; canvas.height = ch;
+          var ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+          var prevData = null;
+          var diffs = [];
+          for (var i = 0; i < sampleCount; i++){
+            var t = Math.min(duration - 0.05, i * step);
+            await seekTo(videoEl, t);
+            ctx.drawImage(videoEl, 0, 0, cw, ch);
+            var frame = ctx.getImageData(0,0,cw,ch).data;
+            if (prevData){
+              var sum = 0;
+              for (var p = 0; p < frame.length; p += 4){
+                sum += Math.abs(frame[p]-prevData[p]) + Math.abs(frame[p+1]-prevData[p+1]) + Math.abs(frame[p+2]-prevData[p+2]);
+              }
+              diffs.push({ t: t, diff: sum / (cw*ch*3) });
+            }
+            prevData = frame;
+            if (onProgress) onProgress((i+1)/sampleCount);
+          }
+
+          var mean = diffs.reduce(function(a,d){ return a+d.diff; }, 0) / (diffs.length || 1);
+          var variance = diffs.reduce(function(a,d){ return a + Math.pow(d.diff-mean,2); }, 0) / (diffs.length || 1);
+          var std = Math.sqrt(variance);
+          var threshold = mean + std * 1.4;
+
+          var cutTimes = [0];
+          var lastCut = 0;
+          diffs.forEach(function(d){
+            if (d.diff > threshold && (d.t - lastCut) > 1.2){
+              cutTimes.push(d.t);
+              lastCut = d.t;
+            }
+          });
+          cutTimes.push(duration);
+
+          var scenes = [];
+          for (var k = 0; k < cutTimes.length - 1; k++){
+            scenes.push({ id: 's'+k, start: cutTimes[k], end: cutTimes[k+1] });
+          }
+
+          // シーン数が多すぎる場合、最も短いシーンから隣と統合して上限まで減らす
+          while (scenes.length > 24){
+            var minIdx = 0, minDur = Infinity;
+            for (var m = 0; m < scenes.length; m++){
+              var dur = scenes[m].end - scenes[m].start;
+              if (dur < minDur){ minDur = dur; minIdx = m; }
+            }
+            if (minIdx === scenes.length - 1) minIdx--;
+            scenes[minIdx].end = scenes[minIdx+1].end;
+            scenes.splice(minIdx+1, 1);
+          }
+
+          var tw = 320, th = Math.round(320 * (videoEl.videoHeight / videoEl.videoWidth || 0.5625));
+          var tcanvas = document.createElement('canvas');
+          tcanvas.width = tw; tcanvas.height = th;
+          var tctx = tcanvas.getContext('2d');
+
+          for (var s = 0; s < scenes.length; s++){
+            var sc = scenes[s];
+            var mid = (sc.start + sc.end) / 2;
+            await seekTo(videoEl, mid);
+            tctx.drawImage(videoEl, 0, 0, tw, th);
+            sc.thumb = tcanvas.toDataURL('image/jpeg', 0.75);
+            sc.category = null;
+            sc.score = null;
+            sc.caption = '';
+            sc.overlay = '';
+            sc.include = true;
+            sc.analyzeError = null;
+          }
+
+          resolve(scenes);
+        } catch (e) {
+          reject(e);
+        }
+      })();
+    });
+  }
+
+  /* ============================================================
+     Claude Vision: シーン判定
+     ============================================================ */
+  async function classifyScene(scene, apiKey, model){
+    var base64 = scene.thumb.split(',')[1];
+    var body = {
+      model: model,
+      max_tokens: 300,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64 } },
+          { type: 'text', text: CLASSIFY_PROMPT }
+        ]
+      }]
+    };
+    var res = await fetch(ANTHROPIC_URL, {
+      method: 'POST',
+      headers: anthropicHeaders(apiKey),
+      body: JSON.stringify(body)
+    });
+    if (!res.ok){
+      var errText = await res.text().catch(function(){ return ''; });
+      throw new Error('APIエラー ' + res.status + ': ' + errText.slice(0,180));
+    }
+    var data = await res.json();
+    var text = (data.content && data.content[0] && data.content[0].text) || '';
+    var parsed = extractJson(text);
+    return {
+      category: CATEGORY_LABELS.indexOf(parsed.category) !== -1 ? parsed.category : 'その他',
+      score: clamp(Math.round(Number(parsed.score) || 5), 1, 10),
+      caption: String(parsed.caption || '').slice(0,30),
+      overlay: String(parsed.overlay || '').slice(0,20),
+    };
+  }
+
+  /* ============================================================
+     Claude: 一言での再編集方針の取得
+     ============================================================ */
+  function buildReeditPrompt(instruction, summary){
+    return 'あなたはSNS向け動画リールの編集ディレクターです。次のシーン一覧と、ユーザーからの一言指示をもとに、リール全体の編集方針をJSONで1つだけ返してください。説明文やコードブロックは不要です。\n\n' +
+      'ユーザーの指示:「' + instruction + '」\n\n' +
+      'シーン一覧(JSON): ' + JSON.stringify(summary) + '\n\n' +
+      '回答は必ず次の形式のJSONのみ:\n' +
+      '{"categoryWeight":{"料理":0〜2の数値,"外観":0〜2の数値,"店内":0〜2の数値,"スタッフ":0〜2の数値,"その他":0〜2の数値},' +
+      '"targetDurationSec":8〜40の整数,"cutStyle":"fast" or "normal" or "slow","colorGrade":"warm" or "cool" or "neutral" or "muted" or "vivid",' +
+      '"toneNote":"編集方針を一言で説明する日本語の短いメモ"}';
+  }
+
+  async function requestReeditParams(instruction, summary, apiKey, model){
+    var body = {
+      model: model,
+      max_tokens: 400,
+      messages: [{ role: 'user', content: [{ type: 'text', text: buildReeditPrompt(instruction, summary) }] }]
+    };
+    var res = await fetch(ANTHROPIC_URL, {
+      method: 'POST',
+      headers: anthropicHeaders(apiKey),
+      body: JSON.stringify(body)
+    });
+    if (!res.ok){
+      var errText = await res.text().catch(function(){ return ''; });
+      throw new Error('APIエラー ' + res.status + ': ' + errText.slice(0,180));
+    }
+    var data = await res.json();
+    var text = (data.content && data.content[0] && data.content[0].text) || '';
+    return extractJson(text);
+  }
+
+  /* ============================================================
+     BGM: ビート（オンセット）検出
+     ============================================================ */
+  async function detectBeats(file){
+    var arrayBuffer = await file.arrayBuffer();
+    var AudioCtx = window.AudioContext || window.webkitAudioContext;
+    var actx = new AudioCtx();
+    var audioBuffer = await actx.decodeAudioData(arrayBuffer);
+    var raw = audioBuffer.getChannelData(0);
+    var sr = audioBuffer.sampleRate;
+    var windowSize = Math.round(sr * 0.02);
+    var energies = [];
+    for (var i = 0; i < raw.length; i += windowSize){
+      var end = Math.min(raw.length, i + windowSize);
+      var sum = 0;
+      for (var j = i; j < end; j++) sum += raw[j]*raw[j];
+      energies.push({ t: i/sr, e: Math.sqrt(sum/(end-i)) });
+    }
+    var onsets = [];
+    for (var k = 1; k < energies.length; k++){
+      onsets.push({ t: energies[k].t, d: Math.max(0, energies[k].e - energies[k-1].e) });
+    }
+    var win = 43;
+    var beats = [];
+    var lastBeat = -1;
+    for (var n = 0; n < onsets.length; n++){
+      var lo = Math.max(0, n-win), hi = Math.min(onsets.length, n+win);
+      var s = 0; for (var w = lo; w < hi; w++) s += onsets[w].d;
+      var localMean = s/(hi-lo || 1);
+      if (onsets[n].d > localMean*1.6 && onsets[n].d > 0.008 && (onsets[n].t - lastBeat) > 0.25){
+        beats.push(onsets[n].t);
+        lastBeat = onsets[n].t;
+      }
+    }
+    actx.close();
+    return { duration: audioBuffer.duration, beats: beats };
+  }
+
+  function snapToBeat(t, beats, tolerance){
+    tolerance = tolerance || 0.3;
+    if (!beats || !beats.length) return t;
+    var closest = beats[0], minDiff = Math.abs(beats[0]-t);
+    for (var i = 1; i < beats.length; i++){
+      var d = Math.abs(beats[i]-t);
+      if (d < minDiff){ minDiff = d; closest = beats[i]; }
+    }
+    return minDiff <= tolerance ? closest : t;
+  }
+
+  /* ============================================================
+     タイムライン構築
+     ============================================================ */
+  function buildTimeline(scenes, params, beats, targetSec){
+    var included = scenes.filter(function(s){ return s.include; });
+    var minDur = params.cutStyle === 'fast' ? 0.9 : (params.cutStyle === 'slow' ? 2.0 : 1.4);
+    var maxDur = params.cutStyle === 'fast' ? 2.2 : (params.cutStyle === 'slow' ? 4.0 : 3.0);
+
+    var weighted = included.map(function(s){
+      var weight = (params.weights[s.category] != null ? params.weights[s.category] : 0.5) * (s.score || 5);
+      return { scene: s, weight: weight };
+    }).sort(function(a,b){ return b.weight - a.weight; });
+
+    var picked = [], total = 0;
+    for (var i = 0; i < weighted.length; i++){
+      if (total >= targetSec) break;
+      var scene = weighted[i].scene;
+      var full = scene.end - scene.start;
+      var clipDur = Math.min(full, Math.max(Math.min(full, minDur), Math.min(maxDur, full)));
+      var playStart = scene.start;
+      var playEnd = playStart + clipDur;
+      if (beats && beats.length){
+        var snapped = snapToBeat(playEnd, beats, 0.3);
+        if (snapped > playStart + minDur*0.6 && snapped <= scene.end) playEnd = snapped;
+      }
+      picked.push({ sceneId: scene.id, playStart: playStart, playEnd: +playEnd.toFixed(2) });
+      total += (playEnd - playStart);
+    }
+    picked.sort(function(a,b){ return a.playStart - b.playStart; });
+    return picked;
+  }
+
+  function totalDuration(seq){
+    return seq.reduce(function(a,c){ return a + (c.playEnd - c.playStart); }, 0);
+  }
+
+  function recomputeAllPatterns(){
+    var beats = (state.bgm && state.bgm.beats) ? state.bgm.beats : [];
+    var platformTarget = PLATFORM_PRESETS[state.platform].targetSec;
+    state.patterns = PATTERN_DEFS.map(function(def){
+      return {
+        key: def.key, name: def.name, weights: def.weights, cutStyle: def.cutStyle, colorGrade: def.colorGrade,
+        targetSec: platformTarget,
+        sequence: buildTimeline(state.scenes, def, beats, platformTarget),
+      };
+    });
+    if (state.customPattern){
+      state.customPattern.sequence = buildTimeline(state.scenes, state.customPattern, beats, state.customPattern.targetSec);
+      state.patterns.push(state.customPattern);
+    }
+  }
+
+  function getActivePattern(){
+    var found = state.patterns.filter(function(p){ return p.key === state.activePatternKey; })[0];
+    return found || state.patterns[0] || null;
+  }
+
+  function setActivePattern(key){
+    state.activePatternKey = key;
+    renderPatternTabs();
+    renderTimelineStrip();
+  }
+
+  /* ============================================================
+     UI: 動画アップロード
+     ============================================================ */
+  var previewSourceVideo = $('previewSourceVideo');
+  var previewVideo = $('previewVideo');
+
+  function handleVideoFile(file){
+    if (!file) return;
+    var url = URL.createObjectURL(file);
+    previewSourceVideo.src = url;
+    $('videoPreviewWrap').style.display = 'block';
+    previewSourceVideo.onloadedmetadata = function(){
+      state.video = { file: file, url: url, duration: previewSourceVideo.duration, width: previewSourceVideo.videoWidth, height: previewSourceVideo.videoHeight };
+      renderMeta();
+      $('analyzeBtn').disabled = false;
+      previewVideo.src = url;
+    };
+  }
+
+  function renderMeta(){
+    var v = state.video;
+    if (!v) return;
+    $('metaRow').innerHTML =
+      '<span class="meta-chip">' + v.file.name + '</span>' +
+      '<span class="meta-chip">' + fmtTime(v.duration) + '</span>' +
+      '<span class="meta-chip">' + v.width + '×' + v.height + '</span>' +
+      '<span class="meta-chip">' + (v.file.size/1024/1024).toFixed(1) + ' MB</span>';
+  }
+
+  $('videoDropzone').addEventListener('click', function(){ $('videoInput').click(); });
+  $('videoInput').addEventListener('change', function(e){ handleVideoFile(e.target.files[0]); });
+  ['dragover','dragleave','drop'].forEach(function(evt){
+    $('videoDropzone').addEventListener(evt, function(e){
+      e.preventDefault();
+      $('videoDropzone').classList.toggle('drag', evt === 'dragover');
+      if (evt === 'drop' && e.dataTransfer.files[0]) handleVideoFile(e.dataTransfer.files[0]);
+    });
+  });
+
+  $('bgmPickBtn').addEventListener('click', function(){ $('bgmInput').click(); });
+  $('bgmInput').addEventListener('change', function(e){
+    var file = e.target.files[0];
+    if (!file) return;
+    state.bgm = { file: file, beats: [] };
+    $('bgmName').textContent = '選択中: ' + file.name;
+  });
+
+  /* ============================================================
+     UI: 設定パネル
+     ============================================================ */
+  $('apiKeyInput').value = state.apiKey;
+  $('modelSelect').value = state.model;
+  $('settingsBtn').addEventListener('click', function(){ $('settingsPanel').classList.toggle('open'); });
+  $('saveSettingsBtn').addEventListener('click', function(){
+    state.apiKey = $('apiKeyInput').value.trim();
+    state.model = $('modelSelect').value;
+    localStorage.setItem('reelcraft_api_key', state.apiKey);
+    localStorage.setItem('reelcraft_model', state.model);
+    toast('設定を保存しました');
+    $('settingsPanel').classList.remove('open');
+  });
+  document.addEventListener('click', function(e){
+    var panel = $('settingsPanel');
+    if (panel.classList.contains('open') && !panel.contains(e.target) && e.target.id !== 'settingsBtn'){
+      panel.classList.remove('open');
+    }
+  });
+
+  /* ============================================================
+     UI: 解析フロー
+     ============================================================ */
+  function showProgress(show){ $('progressWrap').hidden = !show; }
+  function setProgress(ratio, label){
+    $('progressFill').style.width = clamp(ratio*100,0,100) + '%';
+    $('progressLabel').textContent = label || '';
+  }
+
+  $('analyzeBtn').addEventListener('click', async function(){
+    if (!state.video){ toast('先に動画をアップロードしてください'); return; }
+    $('analyzeBtn').disabled = true;
+    showProgress(true);
+    try {
+      setProgress(0, 'シーンを検出中…');
+      var scenes = await detectScenes(previewSourceVideo, function(p){
+        setProgress(p*0.5, 'シーンを検出中… ' + Math.round(p*100) + '%');
+      });
+      state.scenes = scenes;
+      $('sceneSection').hidden = false;
+      renderSceneGrid();
+
+      if (state.apiKey){
+        for (var i = 0; i < scenes.length; i++){
+          setProgress(0.5 + 0.45*(i/scenes.length), 'AIがシーンを判定中… ' + (i+1) + '/' + scenes.length);
+          try {
+            var result = await classifyScene(scenes[i], state.apiKey, state.model);
+            Object.assign(scenes[i], result);
+          } catch (e) {
+            scenes[i].category = scenes[i].category || 'その他';
+            scenes[i].score = scenes[i].score || 5;
+            scenes[i].analyzeError = e.message;
+          }
+          renderSceneGrid();
+        }
+      } else {
+        scenes.forEach(function(s){ s.category = 'その他'; s.score = 5; });
+        renderSceneGrid();
+        toast('APIキー未設定のため、カテゴリは仮設定です。⚙️設定から追加すると自動判定できます');
+      }
+
+      if (state.bgm){
+        setProgress(0.97, 'BGMのビートを解析中…');
+        try {
+          var beatInfo = await detectBeats(state.bgm.file);
+          state.bgm.beats = beatInfo.beats;
+        } catch (e) {
+          toast('BGMの解析に失敗しました: ' + e.message);
+        }
+      }
+
+      recomputeAllPatterns();
+      setActivePattern('standard');
+      setProgress(1, '完了しました');
+
+      $('reeditSection').hidden = false;
+      $('previewSection').hidden = false;
+      $('captionSection').hidden = false;
+      $('exportSection').hidden = false;
+      renderTimelineStrip();
+      renderLegend();
+    } catch (e) {
+      toast('解析中にエラーが発生しました: ' + e.message);
+    } finally {
+      $('analyzeBtn').disabled = false;
+      setTimeout(function(){ showProgress(false); }, 900);
+    }
+  });
+
+  /* ============================================================
+     UI: シーングリッド
+     ============================================================ */
+  function renderSceneGrid(){
+    var grid = $('sceneGrid');
+    grid.innerHTML = state.scenes.map(function(s, idx){
+      return (
+        '<div class="scene-card">' +
+          '<img class="scene-thumb" src="' + s.thumb + '" alt="scene ' + (idx+1) + '">' +
+          '<div class="scene-body">' +
+            '<div class="scene-time">' + fmtTime(s.start) + ' – ' + fmtTime(s.end) + '</div>' +
+            '<div class="scene-row">' +
+              '<select data-field="category" data-id="' + s.id + '" class="cat-select">' +
+                CATEGORY_LABELS.map(function(c){ return '<option value="' + c + '"' + (s.category===c?' selected':'') + '>' + c + '</option>'; }).join('') +
+              '</select>' +
+              '<input type="number" min="1" max="10" data-field="score" data-id="' + s.id + '" value="' + (s.score != null ? s.score : 5) + '" class="score-input" title="魅力度スコア">' +
+            '</div>' +
+            '<input type="text" data-field="caption" data-id="' + s.id + '" value="' + escapeAttr(s.caption) + '" placeholder="キャッチコピー" class="text-input">' +
+            '<input type="text" data-field="overlay" data-id="' + s.id + '" value="' + escapeAttr(s.overlay) + '" placeholder="商品名・価格など" class="text-input">' +
+            '<label class="include-check"><input type="checkbox" data-field="include" data-id="' + s.id + '"' + (s.include?' checked':'') + '> このシーンを採用</label>' +
+            (s.analyzeError ? '<div class="scene-error" title="' + escapeAttr(s.analyzeError) + '">⚠ AI判定に失敗しました（手動で設定してください）</div>' : '') +
+          '</div>' +
+        '</div>'
+      );
+    }).join('');
+  }
+
+  $('sceneGrid').addEventListener('input', function(e){
+    var field = e.target.dataset.field, id = e.target.dataset.id;
+    if (!field) return;
+    var scene = state.scenes.filter(function(s){ return s.id === id; })[0];
+    if (!scene) return;
+    if (field === 'category'){ scene.category = e.target.value; recomputeAllPatterns(); renderPatternTabs(); renderTimelineStrip(); }
+    else if (field === 'score'){ scene.score = clamp(Number(e.target.value)||5, 1, 10); recomputeAllPatterns(); renderTimelineStrip(); }
+    else if (field === 'caption'){ scene.caption = e.target.value; }
+    else if (field === 'overlay'){ scene.overlay = e.target.value; }
+  });
+  $('sceneGrid').addEventListener('change', function(e){
+    if (e.target.dataset.field === 'include'){
+      var scene = state.scenes.filter(function(s){ return s.id === e.target.dataset.id; })[0];
+      if (scene){ scene.include = e.target.checked; recomputeAllPatterns(); renderPatternTabs(); renderTimelineStrip(); }
+    }
+  });
+
+  /* ============================================================
+     UI: 一言で再編集
+     ============================================================ */
+  $('reeditChips').addEventListener('click', function(e){
+    if (e.target.classList.contains('chip')){
+      $('reeditInput').value = e.target.dataset.text || e.target.textContent;
+    }
+  });
+
+  $('reeditBtn').addEventListener('click', async function(){
+    var instruction = $('reeditInput').value.trim();
+    if (!instruction){ toast('指示内容を入力してください'); return; }
+    if (!state.apiKey){ toast('⚙️設定からAPIキーを登録してください'); return; }
+    if (!state.scenes.length){ toast('先に動画を解析してください'); return; }
+
+    $('reeditStatus').textContent = 'AIが編集方針を検討中…';
+    $('reeditBtn').disabled = true;
+    try {
+      var summary = state.scenes.map(function(s){ return { id: s.id, category: s.category || 'その他', score: s.score || 5, dur: +(s.end-s.start).toFixed(1) }; });
+      var params = await requestReeditParams(instruction, summary, state.apiKey, state.model);
+      state.customPattern = {
+        key: 'custom', name: 'カスタム',
+        weights: params.categoryWeight || PATTERN_DEFS[0].weights,
+        cutStyle: params.cutStyle || 'normal',
+        colorGrade: params.colorGrade || 'neutral',
+        targetSec: clamp(Number(params.targetDurationSec) || PLATFORM_PRESETS[state.platform].targetSec, 6, 60),
+        note: params.toneNote || instruction,
+      };
+      recomputeAllPatterns();
+      setActivePattern('custom');
+      $('reeditStatus').textContent = '反映しました: ' + state.customPattern.note;
+    } catch (e) {
+      $('reeditStatus').textContent = '';
+      toast('再編集に失敗しました: ' + e.message);
+    } finally {
+      $('reeditBtn').disabled = false;
+    }
+  });
+
+  function renderPatternTabs(){
+    var wrap = $('patternTabs');
+    wrap.innerHTML = '';
+    state.patterns.forEach(function(p){
+      var btn = document.createElement('button');
+      btn.className = 'pattern-tab' + (p.key === state.activePatternKey ? ' active' : '');
+      btn.textContent = p.name + (p.sequence && p.sequence.length ? ' (' + fmtTime(totalDuration(p.sequence)) + ')' : '');
+      btn.addEventListener('click', function(){ setActivePattern(p.key); });
+      wrap.appendChild(btn);
+    });
+  }
+
+  /* ============================================================
+     UI: プラットフォーム切り替え
+     ============================================================ */
+  $('platformTabs').addEventListener('click', function(e){
+    var btn = e.target.closest('.platform-tab');
+    if (!btn) return;
+    state.platform = btn.dataset.platform;
+    Array.from($('platformTabs').children).forEach(function(el){ el.classList.toggle('active', el === btn); });
+    recomputeAllPatterns();
+    renderPatternTabs();
+    renderTimelineStrip();
+  });
+
+  /* ============================================================
+     UI: タイムライン / プレビュー再生
+     ============================================================ */
+  function renderLegend(){
+    $('legendRow').innerHTML = CATEGORY_LABELS.map(function(c){
+      return '<span class="legend-item"><span class="legend-dot" style="background:' + CATEGORY_COLORS[c] + '"></span>' + c + '</span>';
+    }).join('');
+  }
+
+  function renderTimelineStrip(){
+    var pattern = getActivePattern();
+    var strip = $('timelineStrip');
+    if (!pattern || !pattern.sequence || !pattern.sequence.length){
+      strip.innerHTML = '<div class="timeline-empty">まだ編集内容がありません</div>';
+      previewVideo.style.filter = 'none';
+      return;
+    }
+    var total = totalDuration(pattern.sequence);
+    strip.innerHTML = '';
+    pattern.sequence.forEach(function(seq){
+      var scene = state.scenes.filter(function(s){ return s.id === seq.sceneId; })[0];
+      var block = document.createElement('div');
+      block.className = 'timeline-clip';
+      block.style.width = ((seq.playEnd - seq.playStart)/total*100) + '%';
+      block.style.background = CATEGORY_COLORS[scene && scene.category] || '#666';
+      block.title = (scene ? scene.category : '') + ' ' + fmtTime(seq.playStart) + '〜' + fmtTime(seq.playEnd);
+      block.addEventListener('click', function(){ previewVideo.currentTime = seq.playStart; });
+      strip.appendChild(block);
+    });
+    previewVideo.style.filter = COLOR_GRADE_FILTERS[pattern.colorGrade] || 'none';
+  }
+
+  function playSequence(videoEl, sequence, onCueChange){
+    if (!sequence.length) return function(){};
+    var idx = 0;
+    videoEl.muted = false;
+    videoEl.currentTime = sequence[0].playStart;
+
+    function onTime(){
+      var cur = sequence[idx];
+      if (!cur) return;
+      if (videoEl.currentTime >= cur.playEnd - 0.03){
+        idx++;
+        if (idx >= sequence.length){
+          videoEl.pause();
+          videoEl.removeEventListener('timeupdate', onTime);
+          if (onCueChange) onCueChange(null);
+          return;
+        }
+        videoEl.currentTime = sequence[idx].playStart;
+        if (onCueChange) onCueChange(sequence[idx]);
+      }
+    }
+    videoEl.addEventListener('timeupdate', onTime);
+    if (onCueChange) onCueChange(sequence[0]);
+    videoEl.play().catch(function(){ toast('再生を開始できませんでした。もう一度「再生」を押してください'); });
+    return function(){ videoEl.removeEventListener('timeupdate', onTime); };
+  }
+
+  $('playBtn').addEventListener('click', function(){
+    var pattern = getActivePattern();
+    if (!pattern || !pattern.sequence.length){ toast('プレビューできる編集がありません'); return; }
+    if (stopPlaybackFn) stopPlaybackFn();
+    stopPlaybackFn = playSequence(previewVideo, pattern.sequence, function(cue){
+      if (!cue){
+        $('overlayTagText').style.display = 'none';
+        $('overlayCategoryBadge').textContent = '';
+        return;
+      }
+      var scene = state.scenes.filter(function(s){ return s.id === cue.sceneId; })[0];
+      $('overlayCategoryBadge').textContent = scene ? scene.category : '';
+      if (scene && scene.overlay){
+        $('overlayTagText').textContent = scene.overlay;
+        $('overlayTagText').style.display = 'inline-block';
+      } else {
+        $('overlayTagText').style.display = 'none';
       }
     });
-  }, { threshold: 0.12 });
-  revealEls.forEach(el => io.observe(el));
+  });
+  $('pauseBtn').addEventListener('click', function(){ previewVideo.pause(); });
 
-  // FAQ accordion
-  document.querySelectorAll('.faq-item').forEach(item => {
-    item.querySelector('.faq-q').addEventListener('click', () => {
-      const isOpen = item.classList.contains('open');
-      document.querySelectorAll('.faq-item.open').forEach(o => o.classList.remove('open'));
-      if (!isOpen) item.classList.add('open');
+  previewVideo.addEventListener('timeupdate', function(){
+    if (!$('showCaptionsToggle').checked){ $('overlayCaptionText').textContent = ''; return; }
+    var t = previewVideo.currentTime;
+    var cue = state.captionCues.filter(function(c){ return t >= c.start && t <= c.end; })[0];
+    $('overlayCaptionText').textContent = cue ? cue.text : '';
+  });
+
+  /* ============================================================
+     UI: 字幕
+     ============================================================ */
+  document.querySelectorAll('.caption-mode-btn').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      document.querySelectorAll('.caption-mode-btn').forEach(function(b){ b.classList.remove('active'); });
+      btn.classList.add('active');
+      state.captionMode = btn.dataset.mode;
+      $('captionPanelManual').classList.toggle('active', state.captionMode === 'manual');
+      $('captionPanelAsr').classList.toggle('active', state.captionMode === 'asr');
     });
   });
+
+  function splitTranscriptToCaptions(text, totalDur){
+    var parts = text.split(/[\n。！？]/).map(function(s){ return s.trim(); }).filter(Boolean);
+    if (!parts.length) return [];
+    var totalChars = parts.reduce(function(a,p){ return a+p.length; }, 0) || 1;
+    var t = 0;
+    return parts.map(function(p){
+      var dur = Math.max(1, totalDur * (p.length/totalChars));
+      var cue = { start: +t.toFixed(2), end: +(t+dur).toFixed(2), text: p };
+      t += dur;
+      return cue;
+    });
+  }
+
+  $('splitCaptionsBtn').addEventListener('click', function(){
+    var pattern = getActivePattern();
+    if (!pattern || !pattern.sequence.length){ toast('先に動画を解析してください'); return; }
+    var text = $('transcriptInput').value.trim();
+    if (!text){ toast('文章を入力してください'); return; }
+    state.captionCues = splitTranscriptToCaptions(text, totalDuration(pattern.sequence));
+    renderCaptionList();
+    toast('字幕を生成しました');
+  });
+
+  $('asrStartBtn').addEventListener('click', function(){
+    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR){ toast('お使いのブラウザは音声認識に対応していません（Chrome推奨）'); return; }
+    asrRecognizer = new SR();
+    asrRecognizer.lang = 'ja-JP';
+    asrRecognizer.continuous = true;
+    asrRecognizer.interimResults = false;
+    var segStart = 0;
+    asrRecognizer.onresult = function(e){
+      var res = e.results[e.results.length-1];
+      if (res.isFinal){
+        var text = res[0].transcript.trim();
+        var end = previewVideo.currentTime;
+        if (text){
+          state.captionCues.push({ start: segStart, end: Math.max(end, segStart+0.8), text: text });
+          renderCaptionList();
+        }
+        segStart = end;
+      }
+    };
+    asrRecognizer.onerror = function(e){ toast('音声認識エラー: ' + e.error); };
+    asrRecognizer.onend = function(){
+      $('asrStartBtn').disabled = false;
+      $('asrStopBtn').disabled = true;
+    };
+    previewVideo.currentTime = 0;
+    previewVideo.muted = false;
+    previewVideo.play();
+    asrRecognizer.start();
+    $('asrStartBtn').disabled = true;
+    $('asrStopBtn').disabled = false;
+  });
+  $('asrStopBtn').addEventListener('click', function(){
+    if (asrRecognizer) asrRecognizer.stop();
+    previewVideo.pause();
+  });
+
+  function renderCaptionList(){
+    var list = $('captionList');
+    list.innerHTML = state.captionCues.map(function(c, idx){
+      return (
+        '<div class="caption-row" data-idx="' + idx + '">' +
+          '<input type="number" step="0.1" data-field="start" value="' + c.start + '">' +
+          '<input type="number" step="0.1" data-field="end" value="' + c.end + '">' +
+          '<input type="text" data-field="text" value="' + escapeAttr(c.text) + '">' +
+          '<button class="btn btn-danger btn-sm" data-action="delete">削除</button>' +
+        '</div>'
+      );
+    }).join('');
+  }
+
+  $('captionList').addEventListener('input', function(e){
+    var row = e.target.closest('.caption-row');
+    if (!row) return;
+    var idx = Number(row.dataset.idx);
+    var cue = state.captionCues[idx];
+    if (!cue) return;
+    var field = e.target.dataset.field;
+    if (field === 'start') cue.start = Number(e.target.value) || 0;
+    else if (field === 'end') cue.end = Number(e.target.value) || 0;
+    else if (field === 'text') cue.text = e.target.value;
+  });
+  $('captionList').addEventListener('click', function(e){
+    if (e.target.dataset.action === 'delete'){
+      var row = e.target.closest('.caption-row');
+      var idx = Number(row.dataset.idx);
+      state.captionCues.splice(idx,1);
+      renderCaptionList();
+    }
+  });
+  $('addCaptionBtn').addEventListener('click', function(){
+    state.captionCues.push({ start:0, end:2, text:'' });
+    renderCaptionList();
+  });
+
+  /* ============================================================
+     UI: 書き出し
+     ============================================================ */
+  $('exportJsonBtn').addEventListener('click', function(){
+    var pattern = getActivePattern();
+    if (!pattern || !pattern.sequence.length){ toast('書き出せる編集がありません'); return; }
+    var payload = {
+      sourceVideo: state.video ? state.video.file.name : null,
+      platform: state.platform,
+      pattern: pattern.name,
+      colorGrade: pattern.colorGrade,
+      cutStyle: pattern.cutStyle,
+      clips: pattern.sequence.map(function(seq){
+        var scene = state.scenes.filter(function(s){ return s.id === seq.sceneId; })[0];
+        return {
+          start: seq.playStart, end: seq.playEnd,
+          category: scene ? scene.category : null,
+          caption: scene ? scene.caption : null,
+          overlay: scene ? scene.overlay : null,
+        };
+      }),
+      captions: state.captionCues,
+      generatedAt: new Date().toISOString(),
+    };
+    downloadBlob('reelcraft-edit.json', JSON.stringify(payload, null, 2), 'application/json');
+  });
+
+  $('exportSrtBtn').addEventListener('click', function(){
+    if (!state.captionCues.length){ toast('字幕がありません'); return; }
+    var out = '';
+    state.captionCues.forEach(function(c, i){
+      out += (i+1) + '\n' + srtTime(c.start) + ' --> ' + srtTime(c.end) + '\n' + c.text + '\n\n';
+    });
+    downloadBlob('reelcraft-captions.srt', out, 'application/x-subrip');
+  });
+
+})();
 </script>
 </body>
 </html>
