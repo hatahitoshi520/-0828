@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>動画テロップ編集プレビュー</title>
+<script src="https://cdn.tailwindcss.com"></script>
+
+<script crossorigin src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"
+  onerror="this.onerror=null;var s=document.createElement('script');s.src='https://unpkg.com/react@18/umd/react.production.min.js';s.crossOrigin='anonymous';document.head.appendChild(s);"></script>
+<script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"
+  onerror="this.onerror=null;var s=document.createElement('script');s.src='https://unpkg.com/react-dom@18/umd/react-dom.production.min.js';s.crossOrigin='anonymous';document.head.appendChild(s);"></script>
+<script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7/babel.min.js"
+  onerror="this.onerror=null;var s=document.createElement('script');s.src='https://unpkg.com/@babel/standalone@7/babel.min.js';document.head.appendChild(s);"></script>
+
+<style>
+  html, body { margin: 0; padding: 0; background: #f9fafb; }
+  #root { min-height: 100vh; }
+  #boot-error { display:none; color:#fca5a5; background:#1f2937; font-family:monospace; font-size:12px; white-space:pre-wrap; padding:16px; }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .animate-fade-in { animation: fadeIn 0.25s ease-out; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div id="boot-error"></div>
+
+<script id="app-source" type="text/plain">
+const { useState, useEffect, useRef } = React;
+
+const VideoPreviewApp = () => {
+  const [currentTime, setCurrentTime] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [duration] = useState(25); // 全体の動画の長さ（秒）
+  const timerRef = useRef(null);
+
+  // テロップのデータ（初期値はご提示いただいた動画の構成）
+  const [subtitles, setSubtitles] = useState([
+    { id: 1, text: "この店、最初は誰も来ませんでした。", start: 0, end: 3.5 },
+    { id: 2, text: "朝5時に開けても、0人の日もあって。", start: 3.5, end: 6.5 },
+    { id: 3, text: "それでも毎日、開けてました。", start: 7.0, end: 10.0 },
+    { id: 4, text: "ある日、1人のお客さんが来て。", start: 10.5, end: 13.5 },
+    { id: 5, text: "“ここ、落ち着くな” って言ってくれて。", start: 14.0, end: 17.0 },
+    { id: 6, text: "その一言で、続けようと思えました。", start: 17.5, end: 20.5 },
+    { id: 7, text: "このコーヒー、家でも飲めるようにします。", start: 21.0, end: 24.0 },
+  ]);
+
+  // 再生制御
+  useEffect(() => {
+    if (isPlaying) {
+      timerRef.current = setInterval(() => {
+        setCurrentTime((prevTime) => {
+          if (prevTime >= duration) {
+            setIsPlaying(false);
+            return 0;
+          }
+          return prevTime + 0.1;
+        });
+      }, 100);
+    } else {
+      clearInterval(timerRef.current);
+    }
+    return () => clearInterval(timerRef.current);
+  }, [isPlaying, duration]);
+
+  const handlePlayPause = () => {
+    if (currentTime >= duration) setCurrentTime(0);
+    setIsPlaying(!isPlaying);
+  };
+
+  // 現在表示されるべきテロップを取得
+  const currentSubtitle = subtitles.find(
+    (sub) => currentTime >= sub.start && currentTime <= sub.end
+  );
+
+  return (
+    <div className="flex flex-col md:flex-row gap-6 p-6 bg-gray-50 min-h-screen font-sans">
+      {/* 左側：動画プレビューエリア（縦型ショート動画サイズを想定） */}
+      <div className="flex-1 flex flex-col items-center">
+        <h2 className="text-xl font-bold mb-4 text-gray-800">動画プレビュー</h2>
+        <div className="relative w-64 h-[450px] bg-black rounded-lg shadow-xl overflow-hidden border-4 border-gray-800 flex flex-col justify-center items-center">
+          {/* 背景動画の代わりのプレースホルダー */}
+          <div className="absolute inset-0 bg-gradient-to-b from-gray-700 to-gray-900 opacity-50"></div>
+
+          {/* テロップ表示エリア */}
+          <div className="z-10 w-full px-4 text-center">
+            {currentSubtitle ? (
+              <p className="text-white text-xl font-bold leading-relaxed drop-shadow-[0_2px_2px_rgba(0,0,0,0.8)] animate-fade-in">
+                {currentSubtitle.text}
+              </p>
+            ) : null}
+          </div>
+
+          {/* 時間表示（デバッグ用） */}
+          <div className="absolute top-2 right-2 text-white/50 text-xs font-mono">
+            {currentTime.toFixed(1)}s / {duration}s
+          </div>
+        </div>
+
+        {/* プレイヤーコントロール */}
+        <div className="mt-6 w-full max-w-sm flex items-center gap-4">
+          <button
+            onClick={handlePlayPause}
+            className="px-6 py-2 bg-blue-600 text-white rounded-full hover:bg-blue-700 font-bold transition-colors"
+          >
+            {isPlaying ? "一時停止" : "再生"}
+          </button>
+          <input
+            type="range"
+            min="0"
+            max={duration}
+            step="0.1"
+            value={currentTime}
+            onChange={(e) => {
+              setCurrentTime(parseFloat(e.target.value));
+              setIsPlaying(false);
+            }}
+            className="w-full"
+          />
+        </div>
+      </div>
+
+      {/* 右側：テロップ編集エリア */}
+      <div className="flex-1 bg-white p-6 rounded-lg shadow-md border border-gray-200">
+        <h2 className="text-xl font-bold mb-4 text-gray-800">テロップ設定（タイムライン）</h2>
+        <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2">
+          {subtitles.map((sub, index) => (
+            <div key={sub.id} className={`p-3 rounded border ${currentTime >= sub.start && currentTime <= sub.end ? 'border-blue-500 bg-blue-50' : 'border-gray-300'}`}>
+              <div className="mb-2">
+                <label className="block text-xs font-bold text-gray-600 mb-1">テキスト {index + 1}</label>
+                <input
+                  type="text"
+                  value={sub.text}
+                  onChange={(e) => {
+                    const newSubs = [...subtitles];
+                    newSubs[index] = { ...newSubs[index], text: e.target.value };
+                    setSubtitles(newSubs);
+                  }}
+                  className="w-full p-2 border border-gray-300 rounded text-sm"
+                />
+              </div>
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="block text-xs font-bold text-gray-600 mb-1">開始 (秒)</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    value={sub.start}
+                    onChange={(e) => {
+                      const newSubs = [...subtitles];
+                      newSubs[index] = { ...newSubs[index], start: parseFloat(e.target.value) };
+                      setSubtitles(newSubs);
+                    }}
+                    className="w-full p-1 border border-gray-300 rounded text-sm text-center"
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="block text-xs font-bold text-gray-600 mb-1">終了 (秒)</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    value={sub.end}
+                    onChange={(e) => {
+                      const newSubs = [...subtitles];
+                      newSubs[index] = { ...newSubs[index], end: parseFloat(e.target.value) };
+                      setSubtitles(newSubs);
+                    }}
+                    className="w-full p-1 border border-gray-300 rounded text-sm text-center"
+                  />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-6 pt-4 border-t border-gray-200">
+          <button
+            className="w-full py-2 bg-gray-800 text-white rounded hover:bg-gray-900 text-sm font-bold"
+            onClick={() => {
+              const data = JSON.stringify(subtitles, null, 2);
+              alert("以下のJSONをPythonなどの別プログラムに渡して動画を生成します：\n\n" + data);
+            }}
+          >
+            データを出力する (Python連携用)
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(VideoPreviewApp));
+</script>
+
+<script>
+  function bootApp(attempt) {
+    attempt = attempt || 0;
+    if (typeof Babel === 'undefined' || typeof React === 'undefined' || typeof ReactDOM === 'undefined') {
+      if (attempt < 15) {
+        setTimeout(function() { bootApp(attempt + 1); }, 200);
+        return;
+      }
+      var el = document.getElementById('boot-error');
+      el.style.display = 'block';
+      el.textContent = 'CDNからのライブラリ読み込みに失敗しました（React/ReactDOM/Babelのいずれか）。\n'
+        + 'React defined: ' + (typeof React !== 'undefined')
+        + ' / ReactDOM defined: ' + (typeof ReactDOM !== 'undefined')
+        + ' / Babel defined: ' + (typeof Babel !== 'undefined');
+      return;
+    }
+    try {
+      var src = document.getElementById('app-source').textContent;
+      var output = Babel.transform(src, {
+        presets: [["react", { runtime: "classic" }]],
+      }).code;
+      var s = document.createElement('script');
+      s.textContent = output;
+      document.body.appendChild(s);
+    } catch (e) {
+      var el = document.getElementById('boot-error');
+      el.style.display = 'block';
+      el.textContent = '起動時エラー:\n' + (e.stack || e.message || e);
+      console.error(e);
+    }
+  }
+  bootApp();
+</script>
+
+</body>
+</html>
