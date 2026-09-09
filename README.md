@@ -36,6 +36,7 @@
 ```
 marketing_ai/
 ├── main.py            # CLIエントリーポイント
+├── app.py              # Streamlit UI（ブラウザから実行・進捗確認）
 ├── graph.py            # LangGraph の StateGraph 定義（配線・条件分岐）
 ├── state.py            # 共有ステート (AgentState) の型定義
 ├── prompts.py          # 各エージェントのプロンプトテンプレート
@@ -63,6 +64,8 @@ cp .env.example .env
 
 ## 実行
 
+### CLI
+
 ```bash
 python -m marketing_ai.main "30代女性向け時短スキンケア商品のInstagram投稿文を作って"
 ```
@@ -72,6 +75,21 @@ python -m marketing_ai.main "30代女性向け時短スキンケア商品のInst
 ```bash
 python -m marketing_ai.main "..." --max-revisions 5
 ```
+
+### UI（Streamlit）
+
+ブラウザからタスクを入力し、リサーチ→クリエイティブ→レビューの進捗と
+修正履歴をリアルタイムに確認できるUIです。
+
+```bash
+streamlit run marketing_ai/app.py
+```
+
+起動後、サイドバーから `ANTHROPIC_API_KEY` / `TAVILY_API_KEY`（`.env` 未設定の
+場合はここで入力可）と最大修正回数を設定し、タスクを入力して「実行する」を
+押すとエージェントが動き始めます。実行中は各ノード（リサーチ完了・第n稿生成・
+レビュー結果）の進捗がステータス表示され、完了後は最終コンテンツ・審査結果・
+各修正稿とフィードバックの履歴を確認できます。
 
 ## テスト
 
