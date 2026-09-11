@@ -91,17 +91,16 @@ window.storage = {
   list: async () => ({ keys: [] }),
 };
 
-/* 他の端末がデータを更新したら検知して、アプリ側にお知らせします。
-   ★ 修正: 以前は window.location.reload() でページ全体を強制的に
-   再読み込みしていたため、入力途中の画面がその瞬間に消えたり、
-   タブが初期画面（レジタブ）に戻されたりする不具合がありました。
-   今回からは「ページの再読み込み」は一切行わず、カスタムイベント
-   'suzu-cloud-updated' を発火するだけにし、アプリ本体（PosRegister.jsx）
-   側でデータだけをその場で静かに取り直す方式に変更しました。
-   入力中の下書き（例：経費フォームの入力中の内容など）には触れないため、
-   タイピング中に文字が消えることもありません。 */
+/* 他の端末がデータを更新したら検知して自動でページを再読込します。
+   ※ 入力途中の未確定な下書き（例：買い出しの品名欄など）は失われる場合が
+   ありますが、確定済みの注文・経費・シフトなどは全て保存済みなので消えません。
+
+   ★ 修正: 固定間隔のポーリングだけだと「タブを切り替えて戻ってきた直後」
+   などに最大でポーリング間隔ぶんの時間差が生じていました。
+   間隔を短縮した上で、タブが再表示された瞬間・ウィンドウにフォーカスが
+   戻った瞬間にも即座にチェックするようにし、体感の時間差を解消します。 */
 const SUZU_STORAGE_KEY = "kissa-suzu-pos-store";
-const SUZU_POLL_INTERVAL_MS = 6000;
+const SUZU_POLL_INTERVAL_MS = 6000; // 20秒 → 6秒に短縮
 let _suzuPollInFlight = false;
 
 async function suzuCheckForUpdate() {
@@ -110,8 +109,7 @@ async function suzuCheckForUpdate() {
   try {
     const row = await sbFetchRow(SUZU_STORAGE_KEY);
     if (row && _lastKnownUpdatedAt && row.updated_at !== _lastKnownUpdatedAt) {
-      _lastKnownUpdatedAt = row.updated_at; // 先に更新し、同じ変更で何度も発火しないようにする
-      window.dispatchEvent(new CustomEvent("suzu-cloud-updated"));
+      window.location.reload();
     }
   } catch (e) {
     /* 通信エラーは無視して次回ポーリングでリトライ */
@@ -636,6 +634,12 @@ function buildWorkbookArrayBuffer(state) {
   (state.expenses || []).forEach((e) => expRows.push([e.date, e.cat, e.name, e.amount, e.receiptNo || ""]));
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(expRows), "経費");
 
+  const dailyReportRows = [["日付", "①印象に残ったこと（名前）", "①内容", "②お客様", "③こだわり", "④ハプニング", "⑤今日の5人", "⑥明日の楽しみ", "⑦一言"]];
+  (state.dailyReports || []).forEach((r) =>
+    dailyReportRows.push([r.date, r.impressiveName || "", r.impressive || "", r.customerNote || "", r.dedication || "", r.happening || "", r.teamNote || "", r.tomorrowNote || "", r.oneLiner || ""])
+  );
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dailyReportRows), "日報");
+
   const shiftRows = [["日付", "スタッフ", "開始", "終了", "時給"]];
   Object.entries(state.shiftEntries || {}).forEach(([date, list]) => {
     (list || []).forEach((e) => {
@@ -674,6 +678,83 @@ function downloadWorkbookNow(state) {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+/* ============================================================
+   ★ 領収書自動入力 ヘルパー
+   ------------------------------------------------------------
+   写真を軽量化してAI（Claude）に読み取らせ、経費フォームに
+   自動入力するための下ごしらえ。まとめて複数枚選んでも1枚ずつ
+   順番に処理する（同時に大量送信して失敗するのを防ぐため）。
+   ★注意: この関数は https://api.anthropic.com への直接fetchを
+   行います。Claudeのアーティファクト環境では認証プロキシ経由で
+   動作しますが、GitHub Pages等の独立公開サイトではAPIキーの
+   設定がない限り失敗し、その場合は自動的に手入力用のフォームへ
+   フォールバックします（アプリが壊れることはありません）。
+   ============================================================ */
+function resizeImageFileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const maxW = 900;
+        const scale = Math.min(1, maxW / img.width);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.7));
+      };
+      img.onerror = () => reject(new Error("画像の読み込みに失敗しました"));
+      img.src = e.target.result;
+    };
+    reader.onerror = () => reject(new Error("ファイルの読み込みに失敗しました"));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function analyzeReceiptImage(dataUrl) {
+  const base64 = dataUrl.split(",")[1];
+  const prompt = `これは飲食店の経費精算用の領収書・レシート画像です。画像を読み取り、以下の項目をJSON形式のみで出力してください（説明文や前置きは一切不要、JSONオブジェクトのみ）。
+
+{
+  "date": "YYYY-MM-DD形式の発行日（読み取れない場合は空文字）",
+  "cat": "次の選択肢から最も適切な1つ：${EXPENSE_CATEGORIES.join("、")}",
+  "name": "店名や購入内容を簡潔に（例：業務スーパー　食材仕入れ）",
+  "amount": 合計金額の数値（税込・カンマや円記号なしの整数。読み取れない場合は0）,
+  "receiptNo": "レシート番号・領収書番号・取引番号など記載があれば（無ければ空文字）"
+}`;
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-6",
+      max_tokens: 500,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64 } },
+            { type: "text", text: prompt },
+          ],
+        },
+      ],
+    }),
+  });
+  if (!res.ok) throw new Error("APIエラー: " + res.status);
+  const data = await res.json();
+  const text = (data.content && data.content[0] && data.content[0].text) || "";
+  const cleaned = text.replace(/```json|```/g, "").trim();
+  const parsed = JSON.parse(cleaned);
+  return {
+    date: parsed.date || "",
+    cat: EXPENSE_CATEGORIES.includes(parsed.cat) ? parsed.cat : "",
+    name: parsed.name || "",
+    amount: parsed.amount ? String(parsed.amount) : "",
+    receiptNo: parsed.receiptNo || "",
+  };
 }
 
 function buildWeekStats(orders, monday, menuItems) {
@@ -823,6 +904,7 @@ function PosRegister() {
   const [orders, setOrders] = useState([]);
   const [tables, setTables] = useState(emptyTables());
   const [reports, setReports] = useState([]);
+  const [dailyReports, setDailyReports] = useState([]); // 日報（ブログ投稿材料）
   const [activeTableId, setActiveTableId] = useState(TABLE_IDS[0]);
   const [flash, setFlash] = useState("");
   const [modalItem, setModalItem] = useState(null);
@@ -857,6 +939,7 @@ function PosRegister() {
 
   // ---- 経費・確定申告 ----
   const [expenses, setExpenses] = useState([]); // [{id,date,cat,name,amount,receiptNo}]
+  const [receiptQueue, setReceiptQueue] = useState([]); // 領収書まとめ撮影の解析待ち・確認待ちキュー
   const [expYearFilter, setExpYearFilter] = useState("");
   const [taxYear, setTaxYear] = useState("");
 
@@ -887,6 +970,7 @@ function PosRegister() {
     if (parsed.orders) setOrders(parsed.orders);
     if (parsed.tables) setTables({ ...emptyTables(), ...parsed.tables });
     if (parsed.reports) setReports(parsed.reports);
+    if (parsed.dailyReports) setDailyReports(parsed.dailyReports);
     if (parsed.storeArea) setStoreArea(parsed.storeArea);
     if (parsed.buyLists && parsed.buyLists.length) setBuyLists(parsed.buyLists);
     if (parsed.buyState) setBuyState(parsed.buyState);
@@ -912,6 +996,7 @@ function PosRegister() {
               orders: [],
               tables: emptyTables(),
               reports: [],
+              dailyReports: [],
               storeArea: "",
               buyLists: DEFAULT_BUY_LIST,
               buyState: {},
@@ -956,6 +1041,7 @@ function PosRegister() {
         orders,
         tables,
         reports,
+        dailyReports,
         storeArea,
         buyLists,
         buyState,
@@ -988,7 +1074,7 @@ function PosRegister() {
         })();
       }
     },
-    [menuItems, orders, tables, reports, storeArea, buyLists, buyState, shiftStaff, shiftEntries, shiftRequests, expenses, excelEnabled]
+    [menuItems, orders, tables, reports, dailyReports, storeArea, buyLists, buyState, shiftStaff, shiftEntries, shiftRequests, expenses, excelEnabled]
   );
 
   const showFlash = (msg) => {
@@ -1347,6 +1433,62 @@ function PosRegister() {
     }
   };
 
+  /* ============================================================
+     ★ 日報（ホームページのブログ投稿材料）
+     ============================================================ */
+  const buildDailyReportText = (r) => {
+    const dateLabel = new Date(r.date + "T00:00:00").toLocaleDateString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" });
+    return [
+      `【今日の喫茶店日報】${dateLabel}`,
+      "",
+      `① 今日、一番印象に残ったこと（${r.impressiveName || "―"}）`,
+      r.impressive || "―",
+      "",
+      "② 今日のお客様",
+      r.customerNote || "―",
+      "",
+      "③ 今日のこだわり",
+      r.dedication || "―",
+      "",
+      "④ 今日のハプニング",
+      r.happening || "なし",
+      "",
+      "⑤ 今日の5人",
+      r.teamNote || "―",
+      "",
+      "⑥ 明日の楽しみ",
+      r.tomorrowNote || "―",
+      "",
+      "⑦ 今日を一言で",
+      r.oneLiner || "―",
+    ].join("\n");
+  };
+
+  const saveDailyReport = async (draft) => {
+    if (!draft.oneLiner.trim() && !draft.impressive.trim()) {
+      showFlash("最低でも①か⑦のどちらかは入力してください");
+      return false;
+    }
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    const report = { id: genId("dr"), date: dateStr, ...draft, savedAt: new Date().toISOString() };
+    // 同じ日にもう一度保存した場合は、あとから保存した内容で上書きする
+    const next = [report, ...dailyReports.filter((r) => r.date !== dateStr)].sort((a, b) => b.date.localeCompare(a.date));
+    setDailyReports(next);
+    await persistAll({ dailyReports: next });
+    showFlash("日報を保存しました");
+    return true;
+  };
+
+  const copyDailyReportText = async (r) => {
+    try {
+      await navigator.clipboard.writeText(buildDailyReportText(r));
+      showFlash("コピーしました");
+    } catch {
+      showFlash("コピーに失敗しました");
+    }
+  };
+
   const grouped = useMemo(
     () =>
       CATEGORY_ORDER.map((cat) => ({ cat, items: menuItems.filter((m) => m.category === cat) })).filter(
@@ -1648,6 +1790,72 @@ function PosRegister() {
     setExpenses(next);
     await persistAll({ expenses: next });
   };
+
+  /* ============================================================
+     ★ 領収書まとめ撮影 → 自動入力 ロジック
+     ============================================================ */
+  const handleReceiptFilesSelected = async (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";
+    if (!files.length) return;
+    const ids = files.map(() => genId("rq"));
+    const initial = files.map((f, i) => ({
+      id: ids[i],
+      photo: null,
+      date: "",
+      cat: "",
+      name: "",
+      amount: "",
+      receiptNo: "",
+      status: "queued",
+      error: "",
+    }));
+    setReceiptQueue((q) => [...q, ...initial]);
+
+    for (let i = 0; i < files.length; i++) {
+      const id = ids[i];
+      try {
+        const dataUrl = await resizeImageFileToDataUrl(files[i]);
+        setReceiptQueue((q) => q.map((x) => (x.id === id ? { ...x, photo: dataUrl, status: "analyzing" } : x)));
+        const parsed = await analyzeReceiptImage(dataUrl);
+        setReceiptQueue((q) => q.map((x) => (x.id === id ? { ...x, ...parsed, status: "done" } : x)));
+      } catch (err) {
+        console.error("receipt analyze failed", err);
+        setReceiptQueue((q) =>
+          q.map((x) => (x.id === id ? { ...x, status: "error", error: "自動読み取りに失敗しました。手入力してください。" } : x))
+        );
+      }
+    }
+  };
+
+  const commitReceiptQueueItem = async (id, draft) => {
+    const ok = await addExpense(draft);
+    if (ok) setReceiptQueue((q) => q.filter((x) => x.id !== id));
+  };
+
+  const removeReceiptQueueItem = (id) => {
+    setReceiptQueue((q) => q.filter((x) => x.id !== id));
+  };
+
+  const acceptAllReceiptItemsAsIs = async () => {
+    const doneItems = receiptQueue.filter((x) => x.status === "done");
+    if (!doneItems.length) {
+      showFlash("読み取り完了している項目がありません");
+      return;
+    }
+    let successCount = 0;
+    const successIds = [];
+    for (const item of doneItems) {
+      const ok = await addExpense({ date: item.date, cat: item.cat, name: item.name, amount: item.amount, receiptNo: item.receiptNo });
+      if (ok) {
+        successCount++;
+        successIds.push(item.id);
+      }
+    }
+    setReceiptQueue((q) => q.filter((x) => !successIds.includes(x.id)));
+    if (successCount > 0) showFlash(`${successCount}件を一括登録しました`);
+  };
+
   const expenseYears = useMemo(() => [...new Set(expenses.map((e) => e.date.slice(0, 4)))].sort().reverse(), [expenses]);
   const activeExpYear = expenseYears.includes(expYearFilter) ? expYearFilter : expenseYears[0] || String(new Date().getFullYear());
   const activeTaxYear = expenseYears.includes(taxYear) ? taxYear : expenseYears[0] || String(new Date().getFullYear());
@@ -2353,6 +2561,33 @@ function PosRegister() {
         ============================================================ */}
         {tab === "expense" && (
           <div className="p-3 space-y-4">
+            <div className="bg-slate-800/60 rounded-lg p-3 border border-dashed border-teal-700 space-y-2">
+              <div className="text-teal-300 text-xs font-bold tracking-widest flex items-center gap-1">
+                <Upload size={13} /> 領収書から自動入力（まとめて撮影OK）
+              </div>
+              <div className="text-[11px] text-slate-400 leading-relaxed">
+                複数枚まとめて選択できます。AIが内容を読み取りますが、金額・日付・カテゴリは必ず確認してから登録してください（読み取りに失敗した場合は手入力用のフォームに切り替わります）。
+              </div>
+              <label className="w-full bg-teal-700 text-white rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-1.5 cursor-pointer">
+                <Upload size={14} /> 領収書を撮影・まとめて選択する
+                <input type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={handleReceiptFilesSelected} />
+              </label>
+              {receiptQueue.length > 0 && (
+                <>
+                  <div className="space-y-2 pt-1">
+                    {receiptQueue.map((item) => (
+                      <ReceiptQueueItem key={item.id} item={item} onCommit={commitReceiptQueueItem} onRemove={removeReceiptQueueItem} />
+                    ))}
+                  </div>
+                  {receiptQueue.some((x) => x.status === "done") && (
+                    <button onClick={acceptAllReceiptItemsAsIs} className="w-full bg-slate-700 text-stone-100 rounded-lg py-2 text-xs font-bold mt-1">
+                      読み取り済みをAIの内容のまま一括登録する
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+
             <ExpenseForm onSubmit={addExpense} />
 
             <div>
@@ -2505,6 +2740,28 @@ function PosRegister() {
               <div className="text-[11px] text-slate-500 mt-1.5">
                 タップするとLINEアプリが開き、本日の売上サマリーを友だち・グループに送信できます（LINE未インストールの場合はブラウザで開きます）。
               </div>
+            </div>
+
+            <div>
+              <div className="text-amber-400 text-xs font-bold tracking-widest mb-1.5">今日の喫茶店日報（ホームページ・ブログ投稿用）</div>
+              <DailyReportForm onSubmit={saveDailyReport} />
+              {dailyReports.length > 0 && (
+                <div className="space-y-2 mt-2">
+                  {dailyReports.slice(0, 14).map((r) => (
+                    <div key={r.id} className="bg-slate-800 rounded-lg p-3 border border-slate-700">
+                      <div className="flex justify-between items-center mb-1">
+                        <div className="font-bold text-sm text-amber-300">
+                          {new Date(r.date + "T00:00:00").toLocaleDateString("ja-JP", { month: "2-digit", day: "2-digit" })}
+                        </div>
+                        <button onClick={() => copyDailyReportText(r)} className="text-xs bg-slate-700 rounded-lg px-2.5 py-1 flex items-center gap-1">
+                          <Copy size={11} /> コピー
+                        </button>
+                      </div>
+                      <div className="text-xs text-stone-300 leading-relaxed">{r.oneLiner || r.impressive || "（本文なし）"}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="bg-teal-900/40 rounded-lg p-3 border border-teal-800">
@@ -3157,6 +3414,176 @@ function MenuAddItemForm({ onAdd }) {
       </select>
       <button onClick={submit} className="w-full bg-amber-500 text-slate-900 rounded-lg py-2 text-sm font-bold">
         追加する
+      </button>
+    </div>
+  );
+}
+
+/* ============================================================
+   領収書キューの1件分（自分専用のローカルstateで編集し、
+   親には「登録する」を押したときだけ確定値を渡す）
+   ============================================================ */
+function ReceiptQueueItem({ item, onCommit, onRemove }) {
+  const [date, setDate] = useState(item.date);
+  const [cat, setCat] = useState(item.cat);
+  const [name, setName] = useState(item.name);
+  const [amount, setAmount] = useState(item.amount);
+  const [receiptNo, setReceiptNo] = useState(item.receiptNo);
+
+  useEffect(() => {
+    setDate(item.date);
+    setCat(item.cat);
+    setName(item.name);
+    setAmount(item.amount);
+    setReceiptNo(item.receiptNo);
+    // AI解析が完了した瞬間（statusの変化）にだけ初期値を反映する。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item.status]);
+
+  return (
+    <div className="bg-slate-800 rounded-lg border border-slate-700 p-3 space-y-2">
+      <div className="flex items-center gap-2">
+        {item.photo && <img src={item.photo} alt="領収書" className="w-14 h-14 object-cover rounded border border-slate-600 shrink-0" />}
+        <div className="flex-1 text-xs">
+          {item.status === "queued" && <span className="text-slate-400">待機中…</span>}
+          {item.status === "analyzing" && (
+            <span className="text-teal-300 flex items-center gap-1">
+              <RefreshCw size={12} className="animate-spin" /> 読み取り中…
+            </span>
+          )}
+          {item.status === "error" && <span className="text-rose-300">{item.error || "読み取りに失敗しました"}</span>}
+          {item.status === "done" && <span className="text-emerald-300">読み取り完了。内容を確認してください</span>}
+        </div>
+        <button onClick={() => onRemove(item.id)} className="text-slate-500 shrink-0">
+          <X size={15} />
+        </button>
+      </div>
+
+      {(item.status === "done" || item.status === "error") && (
+        <>
+          <input
+            type="date"
+            className="w-full bg-slate-900 rounded px-2 py-1.5 text-sm border border-slate-700"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+          />
+          <div className="flex flex-wrap gap-1.5">
+            {EXPENSE_CATEGORIES.map((c) => (
+              <button
+                key={c}
+                onClick={() => setCat(c)}
+                className={"px-2 py-1 rounded text-xs font-bold border " + (cat === c ? "bg-amber-400 text-slate-900 border-amber-500" : "bg-slate-900 border-slate-700 text-slate-300")}
+              >
+                {c}
+              </button>
+            ))}
+          </div>
+          <input
+            placeholder="内容"
+            className="w-full bg-slate-900 rounded px-2 py-1.5 text-sm border border-slate-700"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <div className="flex gap-2">
+            <input
+              type="number"
+              placeholder="金額"
+              className="flex-1 bg-slate-900 rounded px-2 py-1.5 text-sm border border-slate-700"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+            />
+            <input
+              placeholder="領収書番号（任意）"
+              className="flex-1 bg-slate-900 rounded px-2 py-1.5 text-sm border border-slate-700"
+              value={receiptNo}
+              onChange={(e) => setReceiptNo(e.target.value)}
+            />
+          </div>
+          <button
+            onClick={() => onCommit(item.id, { date, cat, name, amount, receiptNo })}
+            className="w-full bg-emerald-700 text-white rounded-lg py-2 text-sm font-bold"
+          >
+            この内容で登録する
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   日報フォーム（独立したローカルstateを持ち、入力ラグを防ぐ）
+   ============================================================ */
+function DailyReportForm({ onSubmit }) {
+  const [impressiveName, setImpressiveName] = useState("");
+  const [impressive, setImpressive] = useState("");
+  const [customerNote, setCustomerNote] = useState("");
+  const [dedication, setDedication] = useState("");
+  const [happening, setHappening] = useState("");
+  const [teamNote, setTeamNote] = useState("");
+  const [tomorrowNote, setTomorrowNote] = useState("");
+  const [oneLiner, setOneLiner] = useState("");
+
+  const submit = async () => {
+    const ok = await onSubmit({ impressiveName, impressive, customerNote, dedication, happening, teamNote, tomorrowNote, oneLiner });
+    if (ok) {
+      setImpressiveName("");
+      setImpressive("");
+      setCustomerNote("");
+      setDedication("");
+      setHappening("");
+      setTeamNote("");
+      setTomorrowNote("");
+      setOneLiner("");
+    }
+  };
+
+  const ta = "w-full bg-slate-900 rounded px-2 py-1.5 text-sm border border-slate-700 min-h-[54px]";
+  const lbl = "text-xs text-slate-400 mb-1";
+
+  return (
+    <div className="bg-slate-800 rounded-lg border border-slate-700 p-3 space-y-3">
+      <div>
+        <div className={lbl}>① 今日、一番印象に残ったこと（名前も入力）</div>
+        <input
+          placeholder="名前（例：山田）"
+          className="w-full bg-slate-900 rounded px-2 py-1.5 text-sm border border-slate-700 mb-1"
+          value={impressiveName}
+          onChange={(e) => setImpressiveName(e.target.value)}
+        />
+        <textarea placeholder="1〜2行で" className={ta} value={impressive} onChange={(e) => setImpressive(e.target.value)} />
+      </div>
+      <div>
+        <div className={lbl}>② 今日のお客様（印象的な会話・出来事。個人が特定できる情報は書かない）</div>
+        <textarea className={ta} value={customerNote} onChange={(e) => setCustomerNote(e.target.value)} />
+      </div>
+      <div>
+        <div className={lbl}>③ 今日のこだわり（料理・コーヒー・接客・店内などで頑張ったこと）</div>
+        <textarea className={ta} value={dedication} onChange={(e) => setDedication(e.target.value)} />
+      </div>
+      <div>
+        <div className={lbl}>④ 今日のハプニング（なければ「なし」でOK）</div>
+        <textarea className={ta} value={happening} onChange={(e) => setHappening(e.target.value)} />
+      </div>
+      <div>
+        <div className={lbl}>⑤ 今日の5人（例：○○が仕込みを頑張った、程度でOK）</div>
+        <textarea className={ta} value={teamNote} onChange={(e) => setTeamNote(e.target.value)} />
+      </div>
+      <div>
+        <div className={lbl}>⑥ 明日の楽しみ（やってみたいこと・試したいこと・変えたいこと）</div>
+        <textarea className={ta} value={tomorrowNote} onChange={(e) => setTomorrowNote(e.target.value)} />
+      </div>
+      <div>
+        <div className={lbl}>⑦ 今日を一言で</div>
+        <input
+          placeholder="例：朝からバタバタ。でも楽しかった。"
+          className="w-full bg-slate-900 rounded px-2 py-1.5 text-sm border border-slate-700"
+          value={oneLiner}
+          onChange={(e) => setOneLiner(e.target.value)}
+        />
+      </div>
+      <button onClick={submit} className="w-full bg-amber-500 text-slate-900 rounded-lg py-2.5 text-sm font-bold">
+        日報を保存する
       </button>
     </div>
   );
