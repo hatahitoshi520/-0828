@@ -463,6 +463,120 @@ const QUICK_EXPENSES = [
   { label: "携帯・通信", cat: "通信費", name: "携帯電話・通信費" },
 ];
 
+/* ============================================================
+   ★ AI機能（領収書自動読み取り・週次分析）共通ヘルパー
+   ------------------------------------------------------------
+   APIキーはこの端末のlocalStorageにのみ保存します（Supabaseや
+   GitHubのコードには一切含まれません）。ブラウザから直接
+   Anthropic APIを呼ぶため、"anthropic-dangerous-direct-browser-access"
+   ヘッダーが必須です。
+   ============================================================ */
+const ANTHROPIC_KEY_STORAGE = "suzu_anthropic_api_key";
+
+function getAnthropicApiKey() {
+  try {
+    return localStorage.getItem(ANTHROPIC_KEY_STORAGE) || "";
+  } catch {
+    return "";
+  }
+}
+function setAnthropicApiKeyLocal(key) {
+  try {
+    if (key) localStorage.setItem(ANTHROPIC_KEY_STORAGE, key);
+    else localStorage.removeItem(ANTHROPIC_KEY_STORAGE);
+  } catch {
+    /* ignore */
+  }
+}
+
+async function callAnthropicMessages(body) {
+  const key = getAnthropicApiKey();
+  if (!key) {
+    const err = new Error("NO_API_KEY");
+    err.code = "NO_API_KEY";
+    throw err;
+  }
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": key,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`API error ${res.status}: ${text.slice(0, 200)}`);
+  }
+  return res.json();
+}
+
+/* 画像ファイルをリサイズしてDataURLに変換（通信量削減・精度確保のバランス） */
+function resizeImageFileToDataUrl(file, maxW = 900) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxW / img.width);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.82));
+      };
+      img.onerror = () => reject(new Error("画像の読み込みに失敗しました"));
+      img.src = e.target.result;
+    };
+    reader.onerror = () => reject(new Error("ファイルの読み込みに失敗しました"));
+    reader.readAsDataURL(file);
+  });
+}
+
+/* 領収書1枚をAIに読み取らせ、経費フォーム用のJSONを返す。
+   入力エラーを防ぐため、金額は数値以外なら0、日付は不明なら空文字にし、
+   呼び出し側で必ず人の目でも確認できるようにする（自動登録はしない）。 */
+async function analyzeReceiptImage(dataUrl) {
+  const base64 = dataUrl.split(",")[1];
+  const prompt = `これは経費精算用の領収書・レシート画像です。画像を読み取り、以下の項目を厳密なJSON形式のみで出力してください（説明文・前置き・コードブロック記号は一切不要、JSONオブジェクトのみを出力）。
+
+{
+  "date": "YYYY-MM-DD形式の発行日。西暦・和暦どちらでも読み取り西暦に変換すること。読み取れない場合は空文字",
+  "cat": "次の選択肢から最も適切な1つを厳密にそのまま出力：${EXPENSE_CATEGORIES.join("、")}",
+  "name": "店名と購入内容を簡潔に（例：業務スーパー　食材仕入れ）",
+  "amount": 合計金額（税込）の数値のみ。カンマや円記号は付けない。読み取れない場合は0,
+  "receiptNo": "レシート番号・領収書番号・取引番号などの記載があれば転記、無ければ空文字"
+}
+
+数値は必ず算用数字のみとし、憶測で埋めず読み取れない項目は指示通り空にしてください。`;
+  const data = await callAnthropicMessages({
+    model: "claude-sonnet-4-6",
+    max_tokens: 500,
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64 } },
+          { type: "text", text: prompt },
+        ],
+      },
+    ],
+  });
+  const text = (data.content && data.content[0] && data.content[0].text) || "";
+  const cleaned = text.replace(/```json|```/g, "").trim();
+  const parsed = JSON.parse(cleaned);
+  return {
+    date: parsed.date || "",
+    cat: EXPENSE_CATEGORIES.includes(parsed.cat) ? parsed.cat : "",
+    name: parsed.name || "",
+    amount: parsed.amount ? String(parsed.amount) : "",
+    receiptNo: parsed.receiptNo || "",
+  };
+}
+
 function timeLabel(ts) {
   return new Date(ts).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
@@ -680,83 +794,6 @@ function downloadWorkbookNow(state) {
   URL.revokeObjectURL(url);
 }
 
-/* ============================================================
-   ★ 領収書自動入力 ヘルパー
-   ------------------------------------------------------------
-   写真を軽量化してAI（Claude）に読み取らせ、経費フォームに
-   自動入力するための下ごしらえ。まとめて複数枚選んでも1枚ずつ
-   順番に処理する（同時に大量送信して失敗するのを防ぐため）。
-   ★注意: この関数は https://api.anthropic.com への直接fetchを
-   行います。Claudeのアーティファクト環境では認証プロキシ経由で
-   動作しますが、GitHub Pages等の独立公開サイトではAPIキーの
-   設定がない限り失敗し、その場合は自動的に手入力用のフォームへ
-   フォールバックします（アプリが壊れることはありません）。
-   ============================================================ */
-function resizeImageFileToDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        const maxW = 900;
-        const scale = Math.min(1, maxW / img.width);
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.max(1, Math.round(img.width * scale));
-        canvas.height = Math.max(1, Math.round(img.height * scale));
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL("image/jpeg", 0.7));
-      };
-      img.onerror = () => reject(new Error("画像の読み込みに失敗しました"));
-      img.src = e.target.result;
-    };
-    reader.onerror = () => reject(new Error("ファイルの読み込みに失敗しました"));
-    reader.readAsDataURL(file);
-  });
-}
-
-async function analyzeReceiptImage(dataUrl) {
-  const base64 = dataUrl.split(",")[1];
-  const prompt = `これは飲食店の経費精算用の領収書・レシート画像です。画像を読み取り、以下の項目をJSON形式のみで出力してください（説明文や前置きは一切不要、JSONオブジェクトのみ）。
-
-{
-  "date": "YYYY-MM-DD形式の発行日（読み取れない場合は空文字）",
-  "cat": "次の選択肢から最も適切な1つ：${EXPENSE_CATEGORIES.join("、")}",
-  "name": "店名や購入内容を簡潔に（例：業務スーパー　食材仕入れ）",
-  "amount": 合計金額の数値（税込・カンマや円記号なしの整数。読み取れない場合は0）,
-  "receiptNo": "レシート番号・領収書番号・取引番号など記載があれば（無ければ空文字）"
-}`;
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-6",
-      max_tokens: 500,
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64 } },
-            { type: "text", text: prompt },
-          ],
-        },
-      ],
-    }),
-  });
-  if (!res.ok) throw new Error("APIエラー: " + res.status);
-  const data = await res.json();
-  const text = (data.content && data.content[0] && data.content[0].text) || "";
-  const cleaned = text.replace(/```json|```/g, "").trim();
-  const parsed = JSON.parse(cleaned);
-  return {
-    date: parsed.date || "",
-    cat: EXPENSE_CATEGORIES.includes(parsed.cat) ? parsed.cat : "",
-    name: parsed.name || "",
-    amount: parsed.amount ? String(parsed.amount) : "",
-    receiptNo: parsed.receiptNo || "",
-  };
-}
-
 function buildWeekStats(orders, monday, menuItems) {
   const sundayEnd = new Date(monday);
   sundayEnd.setDate(sundayEnd.getDate() + 7);
@@ -876,17 +913,12 @@ ${
 
 全体で600字以内。断定口調ではなく、プロとしての助言として書いてください。`;
 
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-6",
-      max_tokens: 1500,
-      messages: [{ role: "user", content: prompt }],
-      tools: areaLine ? [{ type: "web_search_20250305", name: "web_search" }] : undefined,
-    }),
+  const data = await callAnthropicMessages({
+    model: "claude-sonnet-4-6",
+    max_tokens: 1500,
+    messages: [{ role: "user", content: prompt }],
+    tools: areaLine ? [{ type: "web_search_20250305", name: "web_search" }] : undefined,
   });
-  const data = await response.json();
   const text = (data.content || [])
     .map((b) => (b.type === "text" ? b.text : ""))
     .filter(Boolean)
@@ -947,6 +979,11 @@ function PosRegister() {
   const [importText, setImportText] = useState("");
   const [importMsg, setImportMsg] = useState("");
   const [importMsgType, setImportMsgType] = useState("");
+
+  // ---- AI機能（Anthropic APIキー）設定 ----
+  const [apiKeySaved, setApiKeySaved] = useState(false);
+  const [apiKeyDraft, setApiKeyDraft] = useState("");
+  const [apiKeyMsg, setApiKeyMsg] = useState("");
 
   // ---- Excel自動保存 ----
   const [excelSupported, setExcelSupported] = useState(false);
@@ -1084,6 +1121,7 @@ function PosRegister() {
 
   useEffect(() => {
     setExcelSupported(excelIsSupported());
+    setApiKeySaved(!!getAnthropicApiKey());
     (async () => {
       const handle = await getUsableExcelHandle(false);
       if (handle) {
@@ -1093,6 +1131,23 @@ function PosRegister() {
     })();
   }, []);
 
+  const handleSaveApiKey = () => {
+    if (!apiKeyDraft.trim()) {
+      setApiKeyMsg("APIキーを入力してください");
+      return;
+    }
+    setAnthropicApiKeyLocal(apiKeyDraft.trim());
+    setApiKeySaved(true);
+    setApiKeyDraft("");
+    setApiKeyMsg("✅ 保存しました（この端末のみ）。領収書の自動読み取り・週次AI分析が使えるようになります。");
+  };
+  const handleClearApiKey = () => {
+    if (!window.confirm("この端末に保存したAPIキーを削除しますか？")) return;
+    setAnthropicApiKeyLocal("");
+    setApiKeySaved(false);
+    setApiKeyMsg("APIキーを削除しました。");
+  };
+
   const handleEnableExcelAutoSave = async () => {
     try {
       const handle = await chooseExcelFile();
@@ -1101,7 +1156,7 @@ function PosRegister() {
       setExcelEnabled(true);
       setExcelMsg("✅ 自動保存を有効にしました。以後、データが変わるたびにこのファイルへ上書き保存されます。");
       // 選んだ直後に現在のデータを書き込んでおく
-      const payload = { menuItems, orders, tables, reports, storeArea, buyLists, buyState, shiftStaff, shiftEntries, shiftRequests, expenses };
+      const payload = { menuItems, orders, tables, reports, dailyReports, storeArea, buyLists, buyState, shiftStaff, shiftEntries, shiftRequests, expenses };
       const buf = buildWorkbookArrayBuffer(payload);
       await writeExcelFile(handle, buf);
     } catch (e) {
@@ -1112,7 +1167,7 @@ function PosRegister() {
   };
 
   const handleManualExcelDownload = () => {
-    const payload = { menuItems, orders, tables, reports, storeArea, buyLists, buyState, shiftStaff, shiftEntries, shiftRequests, expenses };
+    const payload = { menuItems, orders, tables, reports, dailyReports, storeArea, buyLists, buyState, shiftStaff, shiftEntries, shiftRequests, expenses };
     downloadWorkbookNow(payload);
     showFlash("Excelファイルをダウンロードしました");
   };
@@ -1165,7 +1220,11 @@ function PosRegister() {
       if (!silent) showFlash("週次分析を生成しました");
     } catch (e) {
       console.error("weekly report failed", e);
-      setAnalysisError("週次分析の生成に失敗しました。通信状況を確認して再試行してください。");
+      if (e && e.code === "NO_API_KEY") {
+        setAnalysisError("AI機能のAPIキーが未設定です。「品目」タブの「AI機能の設定」からAPIキーを登録してください。");
+      } else {
+        setAnalysisError("週次分析の生成に失敗しました。通信状況を確認して再試行してください。");
+      }
     } finally {
       setAnalyzingWeek(null);
     }
@@ -2842,6 +2901,41 @@ function PosRegister() {
 
         {tab === "menu" && (
           <div className="p-3 space-y-3">
+            <div className="bg-slate-800/60 rounded-lg p-3 border border-dashed border-indigo-700 space-y-2">
+              <div className="text-indigo-300 text-xs font-bold tracking-widest flex items-center gap-1">
+                <Sparkles size={13} /> AI機能の設定（APIキー）
+              </div>
+              <div className="text-[11px] text-slate-400 leading-relaxed">
+                領収書の自動読み取り・週次AI分析には、Anthropic社のAPIキーが必要です（
+                <span className="text-indigo-300">console.anthropic.com</span> で取得・課金設定できます）。このキーは
+                <span className="text-indigo-300">この端末のブラウザにのみ</span>保存され、コードやクラウドには一切含まれません。他の端末でも使う場合は、その端末ごとに同じ手順で設定してください。
+              </div>
+              {apiKeySaved ? (
+                <div className="flex items-center justify-between bg-indigo-900/40 rounded-lg px-3 py-2">
+                  <span className="text-indigo-200 text-xs font-bold flex items-center gap-1">
+                    <Check size={13} /> APIキー設定済み
+                  </span>
+                  <button onClick={handleClearApiKey} className="text-[11px] text-rose-300 border border-rose-800 rounded px-2 py-1">
+                    削除
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <input
+                    type="password"
+                    placeholder="sk-ant-... から始まるAPIキー"
+                    className="w-full bg-slate-900 rounded px-2 py-1.5 text-sm border border-slate-700"
+                    value={apiKeyDraft}
+                    onChange={(e) => setApiKeyDraft(e.target.value)}
+                  />
+                  <button onClick={handleSaveApiKey} className="w-full bg-indigo-700 text-white rounded-lg py-2 text-sm font-bold">
+                    この端末に保存する
+                  </button>
+                </>
+              )}
+              {apiKeyMsg && <div className="text-[11px] text-indigo-300">{apiKeyMsg}</div>}
+            </div>
+
             <div className="bg-slate-800/60 rounded-lg p-3 border border-dashed border-emerald-700 space-y-2">
               <div className="text-emerald-300 text-xs font-bold tracking-widest flex items-center gap-1">
                 <Download size={13} /> Excel自動保存
