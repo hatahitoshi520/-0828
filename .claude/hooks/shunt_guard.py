@@ -18,6 +18,15 @@ import sys
 
 LINE_THRESHOLD = int(os.environ.get("SHUNT_LINE_THRESHOLD", "350"))
 
+# Images/binaries/PDFs: Read renders these directly (not as text tokens the
+# same way), and bulk-reader can't usefully "read" them as text either, so
+# the line-count guard doesn't apply.
+BINARY_EXTS = {
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".svg",
+    ".pdf", ".mp4", ".mov", ".webm", ".mp3", ".wav", ".zip", ".gz",
+    ".woff", ".woff2", ".ttf", ".eot",
+}
+
 READ_CMDS = ("cat", "head", "tail", "less", "more")
 FILTER_CMD_RE = re.compile(r"\b(grep|awk|sed|cut|jq|wc|sort|uniq|comm|diff|column)\b")
 SMALL_N_RE = re.compile(r"-n\s*(\d+)")
@@ -43,6 +52,9 @@ def allow():
 def check_read(tool_input):
     file_path = tool_input.get("file_path")
     if not file_path:
+        allow()
+
+    if os.path.splitext(file_path)[1].lower() in BINARY_EXTS:
         allow()
 
     # Explicit range: the caller already knows where to look.
@@ -105,6 +117,8 @@ def check_bash(tool_input):
     targets = find_command_targets(command, used_cmd)
     large_targets = []
     for t in targets:
+        if os.path.splitext(t)[1].lower() in BINARY_EXTS:
+            continue
         lines = count_lines(t)
         if lines is not None and lines > LINE_THRESHOLD:
             large_targets.append((t, lines))

@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VidFlow AI | 撮っただけの動画を、AIが自動編集</title>
+<meta name="description" content="長回しの素材をアップロードするだけ。AIが無音・言い淀みを自動カットし、盛り上がる瞬間を検出、字幕も自動生成。YouTube Shorts・TikTok・Instagram Reels向けに最適化して一括書き出しできるAI動画自動編集アプリ。">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #05070d;
+    --bg-soft: #0a0e1a;
+    --panel: #10131f;
+    --panel-border: rgba(255,255,255,0.08);
+    --text: #f2f4fa;
+    --text-dim: #8b93ab;
+    --accent1: #3ea6ff;
+    --accent2: #33e0a1;
+    --accent3: #ffd166;
+    --grad: linear-gradient(135deg, var(--accent1), var(--accent2) 55%, var(--accent3));
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:"Noto Sans JP", "Hiragino Sans", sans-serif;
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+  h1,h2,h3, .headline-font{ font-family:"Space Grotesk","Noto Sans JP",sans-serif; letter-spacing:-0.01em; }
+  a{color:inherit; text-decoration:none;}
+  img,svg{display:block;}
+  .wrap{ max-width:1180px; margin:0 auto; padding:0 24px; }
+  .grad-text{ background:var(--grad); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .btn{
+    display:inline-flex; align-items:center; justify-content:center; gap:8px;
+    padding:14px 28px; border-radius:999px; font-weight:700; font-size:15px;
+    cursor:pointer; border:1px solid transparent; transition:transform .15s ease, box-shadow .15s ease, opacity .15s ease;
+    white-space:nowrap;
+  }
+  .btn:active{ transform:scale(.97); }
+  .btn-primary{ background:var(--grad); color:#05070d; box-shadow:0 8px 30px -8px rgba(62,166,255,.55); }
+  .btn-primary:hover{ box-shadow:0 12px 34px -6px rgba(51,224,161,.6); }
+  .btn-ghost{ background:rgba(255,255,255,.04); color:var(--text); border-color:var(--panel-border); }
+  .btn-ghost:hover{ background:rgba(255,255,255,.09); }
+  .btn-block{ width:100%; }
+
+  /* ---------- Nav ---------- */
+  header.site{ position:sticky; top:0; z-index:50; backdrop-filter:blur(14px); background:rgba(5,7,13,.72); border-bottom:1px solid var(--panel-border); }
+  .nav-row{ display:flex; align-items:center; justify-content:space-between; height:72px; }
+  .logo{ display:flex; align-items:center; gap:10px; font-weight:700; font-size:18px; }
+  .logo .mark{ width:34px; height:34px; border-radius:10px; background:var(--grad); display:flex; align-items:center; justify-content:center; font-size:17px; }
+  nav.links{ display:flex; gap:32px; font-size:14.5px; color:var(--text-dim); }
+  nav.links a:hover{ color:var(--text); }
+  .nav-actions{ display:flex; align-items:center; gap:14px; }
+  .burger{ display:none; width:38px; height:38px; border-radius:10px; border:1px solid var(--panel-border); background:rgba(255,255,255,.04); align-items:center; justify-content:center; cursor:pointer; }
+  .burger span, .burger span::before, .burger span::after{ content:""; display:block; width:16px; height:2px; background:var(--text); position:relative; transition:.2s; }
+  .burger span::before{ position:absolute; top:-5px; }
+  .burger span::after{ position:absolute; top:5px; }
+  #mobile-menu{ display:none; border-top:1px solid var(--panel-border); background:var(--bg-soft); }
+  #mobile-menu.open{ display:block; }
+  #mobile-menu .wrap{ padding:18px 24px 26px; display:flex; flex-direction:column; gap:16px; }
+  #mobile-menu a{ color:var(--text-dim); font-size:15px; }
+
+  /* ---------- Hero ---------- */
+  .hero{ position:relative; padding:96px 0 60px; overflow:hidden; }
+  .hero-glow{
+    position:absolute; inset:-20% -10% auto -10%; height:640px;
+    background:radial-gradient(60% 60% at 30% 20%, rgba(62,166,255,.22), transparent 70%),
+               radial-gradient(50% 50% at 75% 10%, rgba(51,224,161,.2), transparent 70%),
+               radial-gradient(40% 40% at 55% 45%, rgba(255,209,102,.14), transparent 70%);
+    filter:blur(10px); pointer-events:none;
+  }
+  .hero-grid{ position:relative; display:grid; grid-template-columns:1.05fr .95fr; gap:56px; align-items:center; }
+  .eyebrow{ display:inline-flex; align-items:center; gap:8px; padding:7px 14px; border-radius:999px; background:rgba(255,255,255,.05); border:1px solid var(--panel-border); font-size:13px; color:var(--text-dim); margin-bottom:22px; }
+  .eyebrow .dot{ width:6px; height:6px; border-radius:50%; background:var(--accent2); box-shadow:0 0 0 3px rgba(51,224,161,.2); }
+  h1.hero-title{ font-size:46px; line-height:1.28; font-weight:900; margin:0 0 20px; }
+  .hero-sub{ font-size:17px; line-height:1.85; color:var(--text-dim); margin:0 0 32px; max-width:520px; }
+  .hero-cta{ display:flex; gap:14px; flex-wrap:wrap; margin-bottom:28px; }
+  .hero-note{ font-size:13px; color:var(--text-dim); display:flex; align-items:center; gap:8px; }
+  .hero-note svg{ width:16px; height:16px; flex:none; color:var(--accent2); }
+
+  /* Editing panel mock */
+  .stage{ position:relative; display:flex; justify-content:center; }
+  .editor-card{
+    width:320px; border-radius:22px; background:var(--panel); border:1px solid var(--panel-border);
+    box-shadow:0 30px 80px -20px rgba(0,0,0,.7), 0 0 0 1px rgba(255,255,255,.03);
+    overflow:hidden; position:relative;
+  }
+  .editor-card .preview{ aspect-ratio:9/13; background:linear-gradient(160deg,#0e2333,#0a0e1a 55%,#0e2a22); position:relative; }
+  .editor-card .preview .badge{
+    position:absolute; top:14px; left:14px; display:flex; align-items:center; gap:6px;
+    background:rgba(5,7,13,.65); border:1px solid var(--panel-border); border-radius:999px;
+    padding:6px 12px; font-size:11.5px; font-weight:700; color:var(--accent2);
+  }
+  .editor-card .preview .badge svg{ width:13px; height:13px; }
+  .editor-card .preview .play{
+    position:absolute; inset:0; margin:auto; width:52px; height:52px; border-radius:50%;
+    background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.25);
+    display:flex; align-items:center; justify-content:center;
+  }
+  .editor-card .preview .play svg{ width:20px; height:20px; color:#fff; margin-left:2px; }
+  .editor-card .preview .caption{
+    position:absolute; left:14px; right:14px; bottom:16px; background:rgba(5,7,13,.72);
+    border:1px solid var(--panel-border); border-radius:10px; padding:8px 12px; font-size:12.5px; text-align:center;
+  }
+  .editor-card .track-panel{ padding:14px 16px 18px; border-top:1px solid var(--panel-border); }
+  .track-panel .row{ display:flex; align-items:center; gap:10px; margin-bottom:10px; font-size:11px; color:var(--text-dim); }
+  .waveform{ flex:1; height:22px; display:flex; align-items:flex-end; gap:2px; }
+  .waveform span{ flex:1; background:var(--panel-border); border-radius:2px; }
+  .waveform span.cut{ background:rgba(255,90,90,.55); }
+  .waveform span.keep{ background:var(--grad); }
+  .track-panel .legend{ display:flex; gap:14px; font-size:11px; color:var(--text-dim); }
+  .track-panel .legend i{ width:8px; height:8px; border-radius:2px; display:inline-block; margin-right:5px; vertical-align:middle; }
+  .float-chip{
+    position:absolute; background:var(--panel); border:1px solid var(--panel-border); border-radius:12px;
+    padding:9px 13px; font-size:12px; font-weight:700; box-shadow:0 14px 30px -12px rgba(0,0,0,.6);
+    display:flex; align-items:center; gap:7px;
+  }
+  .float-chip svg{ width:14px; height:14px; }
+  .chip-a{ top:8%; right:-6%; color:var(--accent2); }
+  .chip-b{ bottom:14%; left:-9%; color:var(--accent3); }
+
+  /* ---------- Section shared ---------- */
+  section{ padding:96px 0; }
+  .section-head{ text-align:center; max-width:660px; margin:0 auto 56px; }
+  .section-kicker{ font-size:13px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--accent2); margin-bottom:14px; }
+  .section-title{ font-size:34px; font-weight:900; margin:0 0 16px; line-height:1.4; }
+  .section-desc{ color:var(--text-dim); font-size:15.5px; line-height:1.8; margin:0; }
+  .reveal{ opacity:0; transform:translateY(18px); transition:opacity .6s ease, transform .6s ease; }
+  .reveal.in{ opacity:1; transform:none; }
+
+  /* ---------- Features ---------- */
+  .feature-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:22px; }
+  .feature-card{ background:var(--panel); border:1px solid var(--panel-border); border-radius:18px; padding:28px 24px; }
+  .feature-icon{
+    width:44px; height:44px; border-radius:12px; background:rgba(255,255,255,.05);
+    display:flex; align-items:center; justify-content:center; color:var(--accent2); margin-bottom:18px;
+  }
+  .feature-icon svg{ width:22px; height:22px; }
+  .feature-card h3{ font-size:17px; margin:0 0 10px; }
+  .feature-card p{ font-size:14px; line-height:1.75; color:var(--text-dim); margin:0; }
+
+  /* ---------- How it works ---------- */
+  .how-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:22px; counter-reset:step; }
+  .how-card{ position:relative; padding:26px 22px; background:var(--panel); border:1px solid var(--panel-border); border-radius:18px; }
+  .how-card .num{ font-family:"Space Grotesk"; font-size:34px; font-weight:700; background:var(--grad); -webkit-background-clip:text; background-clip:text; color:transparent; margin-bottom:14px; }
+  .how-card h3{ font-size:16px; margin:0 0 8px; }
+  .how-card p{ font-size:13.5px; color:var(--text-dim); line-height:1.7; margin:0; }
+  .how-arrow{ display:none; }
+
+  /* ---------- Platforms ---------- */
+  .platform-row{ display:flex; flex-wrap:wrap; justify-content:center; gap:14px; }
+  .platform-pill{
+    display:flex; align-items:center; gap:10px; background:var(--panel); border:1px solid var(--panel-border);
+    border-radius:999px; padding:12px 22px; font-size:14px; font-weight:600;
+  }
+  .platform-pill svg{ width:18px; height:18px; color:var(--accent2); }
+
+  /* ---------- Pricing ---------- */
+  .pricing-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:22px; align-items:stretch; }
+  .price-card{ background:var(--panel); border:1px solid var(--panel-border); border-radius:20px; padding:32px 26px; display:flex; flex-direction:column; }
+  .price-card.highlight{ border-color:var(--accent2); box-shadow:0 20px 50px -20px rgba(51,224,161,.35); position:relative; }
+  .price-card.highlight .ribbon{
+    position:absolute; top:-13px; left:50%; transform:translateX(-50%); background:var(--grad); color:#05070d;
+    font-size:11.5px; font-weight:800; padding:5px 14px; border-radius:999px;
+  }
+  .price-card h3{ font-size:18px; margin:0 0 6px; }
+  .price-card .price{ font-family:"Space Grotesk"; font-size:36px; font-weight:700; margin:6px 0 4px; }
+  .price-card .price span{ font-size:14px; font-weight:500; color:var(--text-dim); }
+  .price-card .price-desc{ font-size:13px; color:var(--text-dim); margin:0 0 22px; }
+  .price-card ul{ list-style:none; padding:0; margin:0 0 26px; display:flex; flex-direction:column; gap:12px; flex:1; }
+  .price-card li{ display:flex; align-items:flex-start; gap:10px; font-size:13.5px; color:var(--text-dim); }
+  .price-card li svg{ width:16px; height:16px; flex:none; margin-top:2px; color:var(--accent2); }
+
+  /* ---------- FAQ ---------- */
+  .faq-list{ max-width:760px; margin:0 auto; display:flex; flex-direction:column; gap:12px; }
+  .faq-item{ background:var(--panel); border:1px solid var(--panel-border); border-radius:14px; overflow:hidden; }
+  .faq-q{ display:flex; align-items:center; justify-content:space-between; gap:16px; padding:20px 22px; cursor:pointer; font-weight:600; font-size:15px; }
+  .faq-q svg{ width:18px; height:18px; flex:none; color:var(--text-dim); transition:transform .2s ease; }
+  .faq-item.open .faq-q svg{ transform:rotate(45deg); }
+  .faq-a{ max-height:0; overflow:hidden; transition:max-height .25s ease; }
+  .faq-a p{ margin:0; padding:0 22px 20px; font-size:14px; color:var(--text-dim); line-height:1.75; }
+
+  /* ---------- CTA ---------- */
+  #cta{ text-align:center; }
+  .cta-panel{
+    background:var(--panel); border:1px solid var(--panel-border); border-radius:28px; padding:64px 32px;
+    position:relative; overflow:hidden;
+  }
+  .cta-panel::before{
+    content:""; position:absolute; inset:-40% -10% auto -10%; height:320px;
+    background:radial-gradient(50% 50% at 50% 30%, rgba(51,224,161,.18), transparent 70%); pointer-events:none;
+  }
+  .cta-panel h2{ font-size:30px; margin:0 0 16px; position:relative; }
+  .cta-panel p{ color:var(--text-dim); margin:0 0 30px; position:relative; }
+  .cta-actions{ display:flex; justify-content:center; gap:14px; flex-wrap:wrap; position:relative; }
+
+  /* ---------- Footer ---------- */
+  footer{ border-top:1px solid var(--panel-border); padding:56px 0 32px; }
+  .footer-grid{ display:grid; grid-template-columns:1.4fr 1fr 1fr 1fr; gap:32px; margin-bottom:40px; }
+  .footer-brand p{ color:var(--text-dim); font-size:13.5px; line-height:1.8; margin:14px 0 0; max-width:260px; }
+  .footer-col h4{ font-size:13px; margin:0 0 16px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.06em; }
+  .footer-col ul{ list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:11px; }
+  .footer-col a{ font-size:13.5px; color:var(--text-dim); }
+  .footer-col a:hover{ color:var(--text); }
+  .footer-bottom{ border-top:1px solid var(--panel-border); padding-top:24px; display:flex; justify-content:space-between; flex-wrap:wrap; gap:12px; font-size:12.5px; color:var(--text-dim); }
+
+  /* ---------- Responsive ---------- */
+  @media (max-width:920px){
+    nav.links, .nav-actions .btn-ghost{ display:none; }
+    .burger{ display:flex; }
+    .hero-grid{ grid-template-columns:1fr; }
+    .stage{ order:-1; margin-bottom:20px; }
+    h1.hero-title{ font-size:36px; }
+    .feature-grid{ grid-template-columns:repeat(2,1fr); }
+    .how-grid{ grid-template-columns:repeat(2,1fr); }
+    .pricing-grid{ grid-template-columns:1fr; }
+    .footer-grid{ grid-template-columns:1fr 1fr; }
+  }
+  @media (max-width:560px){
+    .feature-grid{ grid-template-columns:1fr; }
+    .how-grid{ grid-template-columns:1fr; }
+    .footer-grid{ grid-template-columns:1fr; }
+    .section-title{ font-size:26px; }
+    .editor-card{ width:100%; max-width:300px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="site">
+  <div class="wrap nav-row">
+    <a href="#top" class="logo"><span class="mark">⚡</span>VidFlow AI</a>
+    <nav class="links">
+      <a href="#features">機能</a>
+      <a href="#how">使い方</a>
+      <a href="#platforms">対応SNS</a>
+      <a href="#pricing">料金</a>
+      <a href="#faq">よくある質問</a>
+    </nav>
+    <div class="nav-actions">
+      <a href="#pricing" class="btn btn-ghost">料金を見る</a>
+      <a href="#cta" class="btn btn-primary">無料で試す</a>
+      <button class="burger" id="burger" aria-label="メニュー"><span></span></button>
+    </div>
+  </div>
+  <div id="mobile-menu">
+    <div class="wrap">
+      <a href="#features">機能</a>
+      <a href="#how">使い方</a>
+      <a href="#platforms">対応SNS</a>
+      <a href="#pricing">料金</a>
+      <a href="#faq">よくある質問</a>
+      <a href="#cta" class="btn btn-primary btn-block">無料で試す</a>
+    </div>
+  </div>
+</header>
+
+<!-- ================= HERO ================= -->
+<section id="top" class="hero">
+  <div class="hero-glow"></div>
+  <div class="wrap hero-grid">
+    <div>
+      <div class="eyebrow"><span class="dot"></span>AI Video Editing, Reinvented</div>
+      <h1 class="hero-title">撮っただけの素材が、<br><span class="grad-text">公開できる動画</span>に変わる。</h1>
+      <p class="hero-sub">長回しの動画をアップロードするだけ。AIが無音区間や言い淀みを自動でカットし、盛り上がる瞬間を検出、字幕まで自動生成。YouTube・TikTok・Instagram向けに最適な形でまとめて書き出します。</p>
+      <div class="hero-cta">
+        <a href="#cta" class="btn btn-primary">無料で編集を試す</a>
+        <a href="#how" class="btn btn-ghost">使い方を見る</a>
+      </div>
+      <div class="hero-note">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>
+        クレジットカード不要・初回3本まで無料
+      </div>
+    </div>
+
+    <div class="stage">
+      <div class="editor-card">
+        <div class="preview">
+          <div class="badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.4 7.2H22l-6 4.4 2.3 7.1L12 16.3l-6.3 4.4L8 13.6 2 9.2h7.6z"/></svg>ハイライト検出</div>
+          <div class="play"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></div>
+          <div class="caption">"その瞬間、すべてが変わった"</div>
+        </div>
+        <div class="track-panel">
+          <div class="row">
+            <span>00:00</span>
+            <div class="waveform">
+              <span class="keep" style="height:40%"></span><span class="keep" style="height:70%"></span>
+              <span class="cut" style="height:20%"></span><span class="cut" style="height:15%"></span>
+              <span class="keep" style="height:85%"></span><span class="keep" style="height:60%"></span>
+              <span class="keep" style="height:90%"></span><span class="cut" style="height:18%"></span>
+              <span class="keep" style="height:50%"></span><span class="keep" style="height:75%"></span>
+            </div>
+            <span>02:14</span>
+          </div>
+          <div class="legend">
+            <span><i style="background:var(--grad)"></i>採用</span>
+            <span><i style="background:rgba(255,90,90,.55)"></i>自動カット</span>
+          </div>
+        </div>
+      </div>
+      <div class="float-chip chip-a"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h2v6H4zM9 6h2v12H9zM14 9h2v9h-2zM19 3h2v15h-2z"/></svg>字幕を自動生成</div>
+      <div class="float-chip chip-b"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="7" y="2" width="10" height="20" rx="3"/></svg>9:16に自動リサイズ</div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= FEATURES ================= -->
+<section id="features">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="section-kicker">Features</div>
+      <h2 class="section-title">編集の下準備を、AIがまるごと肩代わりする6つの機能</h2>
+      <p class="section-desc">素材を眺めてカット点を探す時間も、字幕を打ち込む時間も要りません。</p>
+    </div>
+
+    <div class="feature-grid">
+      <div class="feature-card reveal">
+        <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h2v6H4zM9 6h2v12H9zM14 9h2v9h-2zM19 3h2v15h-2z"/></svg></div>
+        <h3>無音・言い淀みを自動カット</h3>
+        <p>「えー」「あの」といったフィラーワードや無音区間をAIが検出し、テンポの良い尺に自動で詰めます。</p>
+      </div>
+      <div class="feature-card reveal">
+        <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.4 7.2H22l-6 4.4 2.3 7.1L12 16.3l-6.3 4.4L8 13.6 2 9.2h7.6z"/></svg></div>
+        <h3>ハイライトを自動検出</h3>
+        <p>表情の変化や声のトーン、話の盛り上がりを解析し、思わず見入る瞬間だけを自動で抜き出します。</p>
+      </div>
+      <div class="feature-card reveal">
+        <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a4 4 0 0 1 4 4v6a4 4 0 1 1-8 0V5a4 4 0 0 1 4-4z"/><path d="M5 10v1a7 7 0 0 0 14 0v-1M12 18v4"/></svg></div>
+        <h3>字幕を自動生成・多言語翻訳</h3>
+        <p>音声から字幕を自動で書き起こし、英語・中国語など20以上の言語へワンクリックで翻訳できます。</p>
+      </div>
+      <div class="feature-card reveal">
+        <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="7" y="2" width="10" height="20" rx="3"/><path d="M11 18h2"/></svg></div>
+        <h3>SNS別に自動最適化して書き出し</h3>
+        <p>YouTube Shorts・TikTok・Instagram Reels・LinkedInなど、縦横比や尺をプラットフォームごとに自動調整します。</p>
+      </div>
+      <div class="feature-card reveal">
+        <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.4 8.4 0 0 1-8.9 8.5 8.5 8.5 0 0 1-4.3-1.1L3 20l1.2-4.6A8.4 8.4 0 0 1 12.6 3a8.4 8.4 0 0 1 8.4 8.5z"/></svg></div>
+        <h3>一言だけで再編集</h3>
+        <p>「テンポを速く」「サムネ向けの切り抜きを増やして」と伝えるだけで、AIがトーンごと編集し直します。</p>
+      </div>
+      <div class="feature-card reveal">
+        <div class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></div>
+        <h3>ブランドキットで統一感をキープ</h3>
+        <p>フォント・カラー・ロゴ・BGMを一度登録すれば、次回以降の書き出しに自動で適用されます。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= HOW IT WORKS ================= -->
+<section id="how" style="background:var(--bg-soft); border-top:1px solid var(--panel-border); border-bottom:1px solid var(--panel-border);">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="section-kicker">How it works</div>
+      <h2 class="section-title">アップロードから書き出しまで、4ステップ</h2>
+      <p class="section-desc">操作はドラッグ&ドロップだけ。あとはAIにお任せです。</p>
+    </div>
+    <div class="how-grid">
+      <div class="how-card reveal">
+        <div class="num">01</div>
+        <h3>素材をアップロード</h3>
+        <p>スマホやカメラで撮った動画をそのままドラッグ&ドロップするだけ。</p>
+      </div>
+      <div class="how-card reveal">
+        <div class="num">02</div>
+        <h3>AIが解析</h3>
+        <p>映像・音声・話の内容を同時に解析し、構成案を自動で作成します。</p>
+      </div>
+      <div class="how-card reveal">
+        <div class="num">03</div>
+        <h3>自動で編集</h3>
+        <p>不要なカットの除去、ハイライト抽出、字幕・BGM付けまでを自動生成。</p>
+      </div>
+      <div class="how-card reveal">
+        <div class="num">04</div>
+        <h3>好きな形式で書き出し</h3>
+        <p>各SNS向けに最適化した動画を複数パターン、まとめてダウンロードできます。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= PLATFORMS ================= -->
+<section id="platforms">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="section-kicker">Platforms</div>
+      <h2 class="section-title">主要SNS・配信先にまとめて対応</h2>
+      <p class="section-desc">1本の素材から、それぞれの最適な形式で自動書き出しします。</p>
+    </div>
+    <div class="platform-row reveal">
+      <div class="platform-pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="15" height="14" rx="2"/><path d="M17 9l5-3v12l-5-3"/></svg>YouTube Shorts</div>
+      <div class="platform-pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l9 2-9 2"/><circle cx="6" cy="18" r="3"/></svg>TikTok</div>
+      <div class="platform-pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1"/></svg>Instagram Reels</div>
+      <div class="platform-pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 8h20"/></svg>LinkedIn</div>
+      <div class="platform-pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4l16 16M20 4L4 20"/></svg>X (Twitter)</div>
+      <div class="platform-pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9 9v6l5-3z"/></svg>Podcastクリップ</div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= PRICING ================= -->
+<section id="pricing" style="background:var(--bg-soft); border-top:1px solid var(--panel-border); border-bottom:1px solid var(--panel-border);">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="section-kicker">Pricing</div>
+      <h2 class="section-title">まずは無料で、必要な分だけ</h2>
+      <p class="section-desc">個人クリエイターからチームでの運用まで。</p>
+    </div>
+    <div class="pricing-grid">
+      <div class="price-card reveal">
+        <h3>Free</h3>
+        <div class="price">¥0<span>/月</span></div>
+        <p class="price-desc">まずは試してみたい方に</p>
+        <ul>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>月3本まで書き出し</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>720p書き出し</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>字幕自動生成(日本語)</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>透かしロゴ入り</li>
+        </ul>
+        <a href="#" class="btn btn-ghost btn-block">無料で始める</a>
+      </div>
+      <div class="price-card highlight reveal">
+        <div class="ribbon">人気プラン</div>
+        <h3>Creator</h3>
+        <div class="price">¥2,980<span>/月</span></div>
+        <p class="price-desc">継続的に投稿するクリエイター向け</p>
+        <ul>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>月30本まで書き出し</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>1080pフル書き出し・透かしなし</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>多言語字幕・自動翻訳</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>一言指示での再編集</li>
+        </ul>
+        <a href="#" class="btn btn-primary btn-block">無料で試す</a>
+      </div>
+      <div class="price-card reveal">
+        <h3>Team</h3>
+        <div class="price">¥14,800<span>/月</span></div>
+        <p class="price-desc">チーム・代理店での運用向け</p>
+        <ul>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>書き出し本数無制限</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>4K書き出し対応</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>ブランドキット・チーム共有</li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>優先サポート</li>
+        </ul>
+        <a href="#" class="btn btn-ghost btn-block">お問い合わせ</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= FAQ ================= -->
+<section id="faq">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="section-kicker">FAQ</div>
+      <h2 class="section-title">よくある質問</h2>
+    </div>
+    <div class="faq-list">
+      <div class="faq-item reveal">
+        <div class="faq-q">どんな動画形式に対応していますか?<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></div>
+        <div class="faq-a"><p>MP4・MOV・AVIなど主要な動画形式に対応しています。1本あたり最大10GB、3時間までアップロードできます。</p></div>
+      </div>
+      <div class="faq-item reveal">
+        <div class="faq-q">編集の生成にはどれくらい時間がかかりますか?<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></div>
+        <div class="faq-a"><p>10分程度の素材であれば、目安として2〜3分で自動編集が完了します。複数パターンの同時生成にも対応しています。</p></div>
+      </div>
+      <div class="faq-item reveal">
+        <div class="faq-q">著作権のある音楽は使えますか?<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></div>
+        <div class="faq-a"><p>ロイヤリティフリーのBGMライブラリを内蔵しているほか、ご自身の音源をアップロードして使用することもできます。</p></div>
+      </div>
+      <div class="faq-item reveal">
+        <div class="faq-q">日本語以外の言語にも対応していますか?<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></div>
+        <div class="faq-a"><p>字幕は日本語のほか、英語・中国語・韓国語など20以上の言語へ自動翻訳できます(Creatorプラン以上)。</p></div>
+      </div>
+      <div class="faq-item reveal">
+        <div class="faq-q">無料プランでも商用利用できますか?<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></div>
+        <div class="faq-a"><p>可能です。ただし無料プランで書き出した動画には透かしロゴが入ります。透かしを外すにはCreatorプラン以上をご利用ください。</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= CTA ================= -->
+<section id="cta">
+  <div class="wrap">
+    <div class="cta-panel reveal">
+      <h2 class="headline-font">次にバズる動画は、<br>編集を待っているだけかもしれません。</h2>
+      <p>まずは無料プランで、AIによる自動編集を試してみてください。</p>
+      <div class="cta-actions">
+        <a href="#" class="btn btn-primary">無料で編集を試す</a>
+        <a href="#pricing" class="btn btn-ghost">料金プランを見る</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <a href="#top" class="logo"><span class="mark">⚡</span>VidFlow AI</a>
+        <p>撮っただけの素材を、AIが自動編集。YouTube・TikTok・Instagram向けに最適化した動画を、誰でもすぐに作れます。</p>
+      </div>
+      <div class="footer-col">
+        <h4>プロダクト</h4>
+        <ul>
+          <li><a href="#features">機能</a></li>
+          <li><a href="#how">使い方</a></li>
+          <li><a href="#platforms">対応SNS</a></li>
+          <li><a href="#pricing">料金</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>会社情報</h4>
+        <ul>
+          <li><a href="#">会社概要</a></li>
+          <li><a href="#">採用情報</a></li>
+          <li><a href="#">ブログ</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>サポート</h4>
+        <ul>
+          <li><a href="#faq">よくある質問</a></li>
+          <li><a href="#">お問い合わせ</a></li>
+          <li><a href="#">利用規約</a></li>
+          <li><a href="#">プライバシーポリシー</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>© 2026 VidFlow AI. All rights reserved.</span>
+      <span>Made for creators who'd rather create than edit.</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // Mobile menu toggle
+  const burger = document.getElementById('burger');
+  const mobileMenu = document.getElementById('mobile-menu');
+  burger.addEventListener('click', () => mobileMenu.classList.toggle('open'));
+  mobileMenu.querySelectorAll('a').forEach(a => a.addEventListener('click', () => mobileMenu.classList.remove('open')));
+
+  // FAQ accordion
+  document.querySelectorAll('.faq-item').forEach(item => {
+    const q = item.querySelector('.faq-q');
+    const a = item.querySelector('.faq-a');
+    q.addEventListener('click', () => {
+      const isOpen = item.classList.contains('open');
+      document.querySelectorAll('.faq-item.open').forEach(open => {
+        open.classList.remove('open');
+        open.querySelector('.faq-a').style.maxHeight = null;
+      });
+      if (!isOpen) {
+        item.classList.add('open');
+        a.style.maxHeight = a.scrollHeight + 'px';
+      }
+    });
+  });
+
+  // Scroll reveal
+  const revealEls = document.querySelectorAll('.reveal');
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('in');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.15 });
+  revealEls.forEach(el => observer.observe(el));
+</script>
+
+</body>
+</html>
