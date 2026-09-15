@@ -1435,11 +1435,13 @@ function PosRegister() {
     showFlash("保存しました");
   };
   const deleteMenuItem = async (id) => {
+    if (!window.confirm("このメニューを削除しますか？（元に戻せません）")) return;
     const next = menuItems.filter((m) => m.id !== id);
     await saveMenu(next);
     setEditingItem(null);
   };
   const clearHistory = async () => {
+    if (!window.confirm("会計履歴を全件削除しますか？（元に戻せません）")) return;
     setOrders([]);
     await persistAll({ orders: [] });
     showFlash("履歴を削除しました");
