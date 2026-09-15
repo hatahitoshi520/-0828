@@ -1446,6 +1446,13 @@ function PosRegister() {
     await persistAll({ orders: [] });
     showFlash("履歴を削除しました");
   };
+  const deleteOrder = async (id) => {
+    if (!window.confirm("この会計履歴を削除しますか？（元に戻せません）")) return;
+    const next = orders.filter((o) => o.id !== id);
+    setOrders(next);
+    await persistAll({ orders: next });
+    showFlash("会計履歴を削除しました");
+  };
 
   const todayTotal = orders
     .filter((o) => new Date(o.time).toDateString() === new Date().toDateString())
@@ -2775,7 +2782,12 @@ function PosRegister() {
                     {o.label} ・ <span className="text-amber-400 font-bold">卓{o.table}</span>
                     {o.entryLabel && o.entryLabel !== "-" && <span className="text-slate-500"> (入店 {o.entryLabel})</span>}
                   </div>
-                  <div className="text-amber-300 font-bold">{yen(o.total)}</div>
+                  <div className="flex items-center gap-2">
+                    <div className="text-amber-300 font-bold">{yen(o.total)}</div>
+                    <button onClick={() => deleteOrder(o.id)} className="text-rose-400 shrink-0">
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                 </div>
                 <div className="text-xs text-slate-300 space-y-0.5">
                   {o.lines.map((l, i) => (
