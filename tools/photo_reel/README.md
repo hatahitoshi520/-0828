@@ -53,3 +53,7 @@ python3 tools/photo_reel/make_reel.py \
 - For music, use something you have the rights to use commercially (a
   royalty-free library track, or your own recording) - this script
   doesn't check licensing.
+- **Avoid emoji in `--captions`.** The CJK fonts above don't include emoji
+  glyphs, so an emoji renders as a broken/empty box instead of the emoji
+  itself (found this the hard way on a real caption with ☕). Stick to
+  plain text.
