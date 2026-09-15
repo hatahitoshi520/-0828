@@ -48,6 +48,11 @@ async function sbFetchRow(key) {
 }
 
 async function sbUpsertRow(key, dataObj) {
+  // ★修正: サーバーに書き込む時刻をここで確定し、呼び出し元に返す。
+  // こうしないと呼び出し元が別のタイミングで new Date() を取り直してしまい、
+  // 「自分がいま保存した内容」を「他端末からの更新」と誤検知してしまう
+  // （＝保存するたびに画面が強制リロードされ、入力が中断されるバグの原因）。
+  const updatedAt = new Date().toISOString();
   const res = await fetch(`${SUPABASE_URL}/rest/v1/app_state?on_conflict=id`, {
     method: "POST",
     headers: {
@@ -56,9 +61,9 @@ async function sbUpsertRow(key, dataObj) {
       "Content-Type": "application/json",
       Prefer: "resolution=merge-duplicates,return=minimal",
     },
-    body: JSON.stringify({ id: key, data: dataObj, updated_at: new Date().toISOString() }),
+    body: JSON.stringify({ id: key, data: dataObj, updated_at: updatedAt }),
   });
-  return res.ok;
+  return res.ok ? updatedAt : null;
 }
 
 let _lastKnownUpdatedAt = null;
@@ -78,9 +83,9 @@ window.storage = {
   set: async (key, value /*, shared */) => {
     try {
       const parsed = JSON.parse(value);
-      const ok = await sbUpsertRow(key, parsed);
-      if (!ok) return null;
-      _lastKnownUpdatedAt = new Date().toISOString();
+      const updatedAt = await sbUpsertRow(key, parsed);
+      if (!updatedAt) return null;
+      _lastKnownUpdatedAt = updatedAt;
       return { key, value, shared: true };
     } catch (e) {
       console.error("storage.set failed", e);
