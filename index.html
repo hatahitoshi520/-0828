@@ -113,7 +113,14 @@ async function suzuCheckForUpdate() {
   _suzuPollInFlight = true;
   try {
     const row = await sbFetchRow(SUZU_STORAGE_KEY);
-    if (row && _lastKnownUpdatedAt && row.updated_at !== _lastKnownUpdatedAt) {
+    // ★再修正: Supabaseから返る updated_at は "...+00:00" 形式、こちらが送信する
+    // updated_at は "...Z" 形式で、同じ瞬間でも文字列としては一致しない。
+    // 文字列同士の比較(!==)ではなく、実際の時刻(ミリ秒)に変換して比較する。
+    if (
+      row &&
+      _lastKnownUpdatedAt &&
+      new Date(row.updated_at).getTime() !== new Date(_lastKnownUpdatedAt).getTime()
+    ) {
       window.location.reload();
     }
   } catch (e) {
