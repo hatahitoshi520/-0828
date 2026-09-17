@@ -18,6 +18,7 @@ audio data is sent to any external API.
 """
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -26,9 +27,17 @@ from faster_whisper import WhisperModel
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".avi", ".mkv"}
 
+# ffmpeg/ffprobe write UTF-8 to stdout/stderr regardless of platform, but on
+# Japanese Windows the default locale encoding is cp932 (Shift-JIS), which
+# can't decode every UTF-8 byte sequence ffmpeg produces - Python's
+# subprocess reader threads crash with UnicodeDecodeError if we let them use
+# that default. Force UTF-8 explicitly, replacing anything that still can't
+# be decoded rather than crashing.
+SUBPROCESS_TEXT_KWARGS = {"encoding": "utf-8", "errors": "replace"}
+
 
 def run_ffmpeg(cmd):
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, **SUBPROCESS_TEXT_KWARGS)
     if result.returncode != 0:
         print(result.stderr, file=sys.stderr)
         raise subprocess.CalledProcessError(result.returncode, cmd)
@@ -39,7 +48,7 @@ def probe_duration(path):
     out = subprocess.run(
         ["ffprobe", "-v", "error", "-show_entries", "format=duration",
          "-of", "json", str(path)],
-        capture_output=True, text=True, check=True,
+        capture_output=True, text=True, check=True, **SUBPROCESS_TEXT_KWARGS,
     )
     return float(json.loads(out.stdout)["format"]["duration"])
 
@@ -79,8 +88,9 @@ def build_keep_ranges(segments, duration, pad=0.15, merge_gap=0.35):
 def cut_silence(input_path, keep_ranges, output_path):
     n = len(keep_ranges)
     if n == 1 and keep_ranges[0][0] == 0.0:
-        # Nothing to cut.
-        subprocess.run(["cp", str(input_path), str(output_path)], check=True)
+        # Nothing to cut. Use shutil, not a `cp` subprocess - there's no
+        # cp.exe on Windows.
+        shutil.copy(str(input_path), str(output_path))
         return
 
     filter_parts = []

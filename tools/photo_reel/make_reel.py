@@ -30,6 +30,7 @@ are all optional.
 """
 import argparse
 import platform
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -39,6 +40,14 @@ WIDTH, HEIGHT = 1080, 1920
 FPS = 30
 TRANSITION_DURATION = 0.6
 BRAND_BG = "0x241813"  # warm dark brown, matches a retro-cafe palette
+
+# ffmpeg/ffprobe write UTF-8 to stdout/stderr regardless of platform, but on
+# Japanese Windows the default locale encoding is cp932 (Shift-JIS), which
+# can't decode every UTF-8 byte sequence ffmpeg produces - Python's
+# subprocess reader threads crash with UnicodeDecodeError if we let them use
+# that default. Force UTF-8 explicitly, replacing anything that still can't
+# be decoded rather than crashing.
+SUBPROCESS_TEXT_KWARGS = {"encoding": "utf-8", "errors": "replace"}
 
 # CJK-capable fonts to try, in order, per OS. Override with --font if none
 # of these exist on your machine.
@@ -59,7 +68,7 @@ DEFAULT_FONT_CANDIDATES = {
 
 
 def run_ffmpeg(cmd):
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, **SUBPROCESS_TEXT_KWARGS)
     if result.returncode != 0:
         print(result.stderr, file=sys.stderr)
         raise subprocess.CalledProcessError(result.returncode, cmd)
@@ -175,7 +184,7 @@ def probe_duration(path):
     out = subprocess.run(
         ["ffprobe", "-v", "error", "-show_entries", "format=duration",
          "-of", "csv=p=0", str(path)],
-        capture_output=True, text=True, check=True,
+        capture_output=True, text=True, check=True, **SUBPROCESS_TEXT_KWARGS,
     )
     return float(out.stdout.strip())
 
@@ -183,7 +192,8 @@ def probe_duration(path):
 def crossfade_concat(clip_paths, out_path, transition_duration):
     """Chain xfade across all clips so cuts are crossfades, not hard cuts."""
     if len(clip_paths) == 1:
-        subprocess.run(["cp", str(clip_paths[0]), str(out_path)], check=True)
+        # No cp.exe on Windows - use shutil, not a subprocess.
+        shutil.copy(str(clip_paths[0]), str(out_path))
         return
 
     durations = [probe_duration(p) for p in clip_paths]
