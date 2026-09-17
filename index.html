@@ -950,22 +950,22 @@ ${
    ============================================================ */
 const DEFAULT_CHECKLIST_ITEMS = {
   open: [
-    "換気をする",
-    "レジを開ける",
-    "釣銭を数えて基準額と一致しているか確認する",
-    "客席・テーブルを拭く",
-    "看板・のれんを出す",
-    "トイレの清掃・備品確認",
-    "仕込み状況を確認する",
+    { text: "換気をする" },
+    { text: "レジを開ける" },
+    { text: "釣銭を数えて基準額と一致しているか確認する", withAmount: true },
+    { text: "客席・テーブルを拭く" },
+    { text: "看板・のれんを出す" },
+    { text: "トイレの清掃・備品確認" },
+    { text: "仕込み状況を確認する" },
   ],
   close: [
-    "レジを締める（売上確認）",
-    "釣銭を数えて基準額と一致しているか確認する",
-    "客席・テーブルを片付ける",
-    "厨房・調理器具を洗う",
-    "ゴミを出す",
-    "看板・のれんをしまう",
-    "施錠・戸締りを確認する",
+    { text: "レジを締める（売上確認）" },
+    { text: "釣銭を数えて基準額と一致しているか確認する", withAmount: true },
+    { text: "客席・テーブルを片付ける" },
+    { text: "厨房・調理器具を洗う" },
+    { text: "ゴミを出す" },
+    { text: "看板・のれんをしまう" },
+    { text: "施錠・戸締りを確認する" },
   ],
 };
 const CHECKLIST_RETENTION_DAYS = 14;
@@ -1682,11 +1682,11 @@ function PosRegister() {
     const text = checklistNewItemDraft.trim();
     if (!text) return;
     const list = checklistItems[checklistType] || [];
-    if (list.includes(text)) {
+    if (list.some((i) => i.text === text)) {
       setChecklistNewItemDraft("");
       return;
     }
-    const nextItems = { ...checklistItems, [checklistType]: [...list, text] };
+    const nextItems = { ...checklistItems, [checklistType]: [...list, { text }] };
     setChecklistItems(nextItems);
     setChecklistNewItemDraft("");
     await persistAll({ checklistItems: nextItems });
@@ -1694,7 +1694,7 @@ function PosRegister() {
 
   const removeChecklistItem = async (item) => {
     if (!window.confirm(`「${item}」をチェックリストから削除しますか？`)) return;
-    const list = (checklistItems[checklistType] || []).filter((i) => i !== item);
+    const list = (checklistItems[checklistType] || []).filter((i) => i.text !== item);
     const nextItems = { ...checklistItems, [checklistType]: list };
     setChecklistItems(nextItems);
     await persistAll({ checklistItems: nextItems });
@@ -3092,10 +3092,12 @@ function PosRegister() {
             />
 
             <div className="space-y-2">
-              {(checklistItems[checklistType] || []).map((item) => {
+              {(checklistItems[checklistType] || []).map((it) => {
+                const item = it.text;
                 const todayEntry = checklistLogs.find((l) => l.date === todayYmd() && l.type === checklistType && l.item === item);
                 const done = todayEntry ? todayEntry.done : false;
                 const photo = todayEntry ? todayEntry.photo : null;
+                const amount = todayEntry && todayEntry.amount != null ? todayEntry.amount : "";
                 return (
                   <div key={item} className="bg-slate-800 rounded-lg border border-slate-700 p-2.5">
                     <div className="flex items-center gap-2">
@@ -3127,6 +3129,20 @@ function PosRegister() {
                         <X size={14} />
                       </button>
                     </div>
+                    {it.withAmount && (
+                      <div className="mt-2 flex items-center gap-1.5">
+                        <span className="text-[11px] text-slate-400">金額</span>
+                        <span className="text-[11px] text-slate-400">¥</span>
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          value={amount}
+                          onChange={(e) => updateChecklistEntry(item, { amount: e.target.value })}
+                          placeholder="0"
+                          className="w-28 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm"
+                        />
+                      </div>
+                    )}
                     {photo && (
                       <div className="mt-2 flex items-center gap-2">
                         <img
@@ -3188,6 +3204,7 @@ function PosRegister() {
                               >
                                 {e.done && <Check size={10} />}
                                 {e.item}
+                                {e.amount != null && e.amount !== "" && <span className="text-amber-300">¥{e.amount}</span>}
                                 {e.photo && (
                                   <img
                                     src={e.photo}
