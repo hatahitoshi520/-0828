@@ -60,7 +60,13 @@ python3 tools/autoedit/autoedit.py --input-dir raw_videos --out edited_videos --
 Each `<name>.mp4`/`.mov`/etc. in `raw_videos` becomes
 `edited_videos/<name>_edited.mp4`. One bad/corrupt file doesn't stop the
 rest - failures are logged and summarized at the end (`N succeeded, M
-failed`).
+failed, K already done (skipped)`).
+
+Re-running the same command **skips any file whose output already
+exists** - so if a run partway through a large batch gets interrupted, or
+a handful of files fail, just run the exact same command again and only
+the missing/failed ones will actually be (re)processed. Pass
+`--overwrite` to force redoing files that already have output.
 
 Options:
 
@@ -76,6 +82,7 @@ Options:
 | `--no-captions` | Skip burning in captions |
 | `--no-cut` | Skip silence removal |
 | `--keep-intermediate` | Keep the intermediate silence-cut file for debugging |
+| `--overwrite` | `--input-dir` mode: redo files that already have output (default: skip them) |
 
 With ~100 videos, expect this to take a while - each file does two
 transcription passes (before and after the silence cut) plus the final

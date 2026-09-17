@@ -226,6 +226,10 @@ def main():
     p.add_argument("--no-captions", action="store_true", help="Don't burn in captions")
     p.add_argument("--no-cut", action="store_true", help="Skip silence removal")
     p.add_argument("--keep-intermediate", action="store_true")
+    p.add_argument("--overwrite", action="store_true",
+                    help="--input-dir mode: redo files whose output already exists "
+                         "(default: skip them, so re-running after a partial batch "
+                         "only retries what previously failed)")
     args = p.parse_args()
 
     if bool(args.input) == bool(args.input_dir):
@@ -246,10 +250,14 @@ def main():
         sys.exit(1)
 
     print(f"Found {len(videos)} video(s) in {args.input_dir}", file=sys.stderr)
-    succeeded, failed = [], []
+    succeeded, failed, skipped = [], [], []
     for i, video in enumerate(videos, 1):
         out_path = args.out / f"{video.stem}_edited.mp4"
         print(f"\n=== [{i}/{len(videos)}] {video.name} ===", file=sys.stderr)
+        if out_path.exists() and not args.overwrite:
+            print(f"      already done, skipping ({out_path.name} exists). Pass --overwrite to redo it.", file=sys.stderr)
+            skipped.append(video.name)
+            continue
         try:
             process_video(video, out_path, None, args)
             succeeded.append(video.name)
@@ -257,7 +265,7 @@ def main():
             print(f"FAILED on {video.name}: {e}", file=sys.stderr)
             failed.append(video.name)
 
-    print(f"\nDone: {len(succeeded)} succeeded, {len(failed)} failed.", file=sys.stderr)
+    print(f"\nDone: {len(succeeded)} succeeded, {len(failed)} failed, {len(skipped)} already done (skipped).", file=sys.stderr)
     if failed:
         print("Failed files:\n  " + "\n  ".join(failed), file=sys.stderr)
 
