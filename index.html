@@ -954,10 +954,12 @@ ${
    返させ、マニュアル案の部分だけを抜き出して保存・表示する。
    ============================================================ */
 const MANUAL_CATEGORIES = [
-  { key: "open_close", label: "開店・閉店作業", hint: "仕込み、レジ開け、清掃、締め作業の手順" },
-  { key: "service", label: "接客・オーダー対応", hint: "レジ対応、注文の取り方、クレーム対応の流れ" },
-  { key: "inventory", label: "発注・在庫管理", hint: "食材・備品の発注タイミングと在庫チェックのルール" },
+  { key: "open_close", label: "開店・閉店作業", hint: "仕込み、レジ開け、清掃、締め作業の手順", mode: "ai" },
+  { key: "service", label: "接客・オーダー対応", hint: "レジ対応、注文の取り方、クレーム対応の流れ", mode: "ai" },
+  { key: "inventory", label: "発注・在庫管理", hint: "食材・備品の発注タイミングと在庫チェックのルール", mode: "ai" },
+  { key: "turnover", label: "回転作業", hint: "テーブルの片付け・リセットなど、回転を早くする手順", mode: "manual" },
 ];
+const MENU_MANUAL_VIEW_KEY = "byMenu";
 function emptyManuals() {
   const m = {};
   MANUAL_CATEGORIES.forEach((c) => {
@@ -1003,6 +1005,24 @@ function splitManualResponse(text) {
   if (idx === -1) return { manual: null };
   const manual = text.slice(idx).replace("【マニュアル案】", "").trim();
   return { manual: manual || null };
+}
+
+/* ============================================================
+   ★ 開閉店チェック（写真記録）
+   ------------------------------------------------------------
+   ワンオペ時でも、開店・閉店作業を写真付きでチェックし、
+   あとから他のスタッフ・店長が確認できるようにする機能。
+   写真はクラウドのデータに直接保存するため、際限なく増えないよう
+   直近14日分だけを残し、それより古い記録は保存のたびに整理する。
+   ============================================================ */
+const DEFAULT_CHECKLIST_ITEMS = {
+  open: ["換気をする", "レジを開ける（釣り銭確認）", "客席・テーブルを拭く", "看板・のれんを出す", "トイレの清掃・備品確認", "仕込み状況を確認する"],
+  close: ["レジを締める（売上確認）", "客席・テーブルを片付ける", "厨房・調理器具を洗う", "ゴミを出す", "看板・のれんをしまう", "施錠・戸締りを確認する"],
+};
+const CHECKLIST_RETENTION_DAYS = 14;
+function pruneChecklistLogs(logs) {
+  const cutoff = Date.now() - CHECKLIST_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+  return logs.filter((l) => l.time >= cutoff);
 }
 
 function PosRegister() {
@@ -1062,13 +1082,26 @@ function PosRegister() {
   const [apiKeyDraft, setApiKeyDraft] = useState("");
   const [apiKeyMsg, setApiKeyMsg] = useState("");
 
-  // ---- 業務マニュアル作成（AIチャット） ----
+  // ---- 業務マニュアル作成（AIチャット／手入力） ----
   const [manuals, setManuals] = useState(emptyManuals());
   const [manualCategory, setManualCategory] = useState(MANUAL_CATEGORIES[0].key);
   const [manualDraftInput, setManualDraftInput] = useState("");
   const [manualPendingMsg, setManualPendingMsg] = useState("");
   const [manualSending, setManualSending] = useState(false);
   const [manualError, setManualError] = useState("");
+  const [manualTextDraft, setManualTextDraft] = useState("");
+
+  // ---- メニュー別マニュアル（手入力） ----
+  const [menuManuals, setMenuManuals] = useState({});
+  const [editingMenuManualId, setEditingMenuManualId] = useState(null);
+  const [menuManualDraft, setMenuManualDraft] = useState("");
+
+  // ---- 開閉店チェック（写真記録） ----
+  const [checklistItems, setChecklistItems] = useState(DEFAULT_CHECKLIST_ITEMS);
+  const [checklistLogs, setChecklistLogs] = useState([]);
+  const [checklistType, setChecklistType] = useState("open");
+  const [checklistStaffDraft, setChecklistStaffDraft] = useState("");
+  const [checklistNewItemDraft, setChecklistNewItemDraft] = useState("");
 
   // ---- Excel自動保存 ----
   const [excelSupported, setExcelSupported] = useState(false);
@@ -1101,6 +1134,9 @@ function PosRegister() {
     if (parsed.shiftRequests) setShiftRequests(parsed.shiftRequests);
     if (parsed.expenses) setExpenses(parsed.expenses);
     if (parsed.manuals) setManuals({ ...emptyManuals(), ...parsed.manuals });
+    if (parsed.menuManuals) setMenuManuals(parsed.menuManuals);
+    if (parsed.checklistItems) setChecklistItems(parsed.checklistItems);
+    if (parsed.checklistLogs) setChecklistLogs(parsed.checklistLogs);
   }, []);
 
   useEffect(() => {
@@ -1128,6 +1164,9 @@ function PosRegister() {
               shiftRequests: [],
               expenses: [],
               manuals: emptyManuals(),
+              menuManuals: {},
+              checklistItems: DEFAULT_CHECKLIST_ITEMS,
+              checklistLogs: [],
             }),
             true
           );
@@ -1174,6 +1213,9 @@ function PosRegister() {
         shiftRequests,
         expenses,
         manuals,
+        menuManuals,
+        checklistItems,
+        checklistLogs,
         ...patch,
       };
       try {
@@ -1199,13 +1241,41 @@ function PosRegister() {
         })();
       }
     },
-    [menuItems, orders, tables, reports, dailyReports, storeArea, buyLists, buyState, shiftStaff, shiftEntries, shiftRequests, expenses, manuals, excelEnabled]
+    [
+      menuItems,
+      orders,
+      tables,
+      reports,
+      dailyReports,
+      storeArea,
+      buyLists,
+      buyState,
+      shiftStaff,
+      shiftEntries,
+      shiftRequests,
+      expenses,
+      manuals,
+      menuManuals,
+      checklistItems,
+      checklistLogs,
+      excelEnabled,
+    ]
   );
 
   const showFlash = (msg) => {
     setFlash(msg);
     setTimeout(() => setFlash(""), 1400);
   };
+
+  // 手入力式のマニュアル（回転作業など）のカテゴリに切り替えたら、
+  // その場で編集できるよう下書きにクラウド上の内容を読み込む
+  useEffect(() => {
+    const cat = MANUAL_CATEGORIES.find((c) => c.key === manualCategory);
+    if (cat && cat.mode === "manual") {
+      setManualTextDraft((manuals[manualCategory] && manuals[manualCategory].content) || "");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manualCategory]);
 
   useEffect(() => {
     setExcelSupported(excelIsSupported());
@@ -1691,6 +1761,103 @@ function PosRegister() {
     } catch {
       showFlash("コピーに失敗しました");
     }
+  };
+
+  const saveManualText = async () => {
+    const current = manuals[manualCategory] || { messages: [], content: "", updatedAt: null };
+    const updated = { ...current, content: manualTextDraft.trim(), updatedAt: Date.now() };
+    const nextManuals = { ...manuals, [manualCategory]: updated };
+    setManuals(nextManuals);
+    await persistAll({ manuals: nextManuals });
+    showFlash("マニュアルを保存しました");
+  };
+
+  /* ============================================================
+     ★ メニュー別マニュアル（手入力）
+     ============================================================ */
+  const startEditMenuManual = (itemId) => {
+    setEditingMenuManualId(itemId);
+    setMenuManualDraft((menuManuals[itemId] && menuManuals[itemId].content) || "");
+  };
+  const cancelEditMenuManual = () => {
+    setEditingMenuManualId(null);
+    setMenuManualDraft("");
+  };
+  const saveMenuManual = async (itemId) => {
+    const updated = { content: menuManualDraft.trim(), updatedAt: Date.now() };
+    const next = { ...menuManuals, [itemId]: updated };
+    setMenuManuals(next);
+    await persistAll({ menuManuals: next });
+    setEditingMenuManualId(null);
+    showFlash("メニューのマニュアルを保存しました");
+  };
+
+  /* ============================================================
+     ★ 開閉店チェック（写真記録）
+     ============================================================ */
+  const updateChecklistEntry = async (item, patch) => {
+    const today = todayYmd();
+    const now = Date.now();
+    const idx = checklistLogs.findIndex((l) => l.date === today && l.type === checklistType && l.item === item);
+    let nextLogs;
+    if (idx >= 0) {
+      const merged = { ...checklistLogs[idx], ...patch, time: now };
+      nextLogs = [...checklistLogs.slice(0, idx), merged, ...checklistLogs.slice(idx + 1)];
+    } else {
+      const entry = {
+        id: genId("chk"),
+        type: checklistType,
+        date: today,
+        item,
+        done: false,
+        photo: null,
+        staff: checklistStaffDraft.trim(),
+        time: now,
+        ...patch,
+      };
+      nextLogs = [...checklistLogs, entry];
+    }
+    nextLogs = pruneChecklistLogs(nextLogs);
+    setChecklistLogs(nextLogs);
+    await persistAll({ checklistLogs: nextLogs });
+  };
+
+  const toggleChecklistDone = (item, currentDone) => updateChecklistEntry(item, { done: !currentDone });
+
+  const handleChecklistPhoto = async (item, file) => {
+    if (!file) return;
+    try {
+      const dataUrl = await resizeImageFileToDataUrl(file, 700);
+      await updateChecklistEntry(item, { photo: dataUrl, done: true });
+      showFlash("写真を記録しました");
+    } catch (e) {
+      console.error("checklist photo failed", e);
+      showFlash("写真の保存に失敗しました");
+    }
+  };
+
+  const removeChecklistPhoto = (item) => updateChecklistEntry(item, { photo: null });
+
+  const addChecklistItem = async () => {
+    const text = checklistNewItemDraft.trim();
+    if (!text) return;
+    const list = checklistItems[checklistType] || [];
+    if (list.includes(text)) {
+      setChecklistNewItemDraft("");
+      return;
+    }
+    const nextItems = { ...checklistItems, [checklistType]: [...list, text] };
+    setChecklistItems(nextItems);
+    setChecklistNewItemDraft("");
+    await persistAll({ checklistItems: nextItems });
+  };
+
+  const removeChecklistItem = async (item) => {
+    if (!window.confirm(`「${item}」をチェックリストから削除しますか？`)) return;
+    const list = (checklistItems[checklistType] || []).filter((i) => i !== item);
+    const nextItems = { ...checklistItems, [checklistType]: list };
+    setChecklistItems(nextItems);
+    await persistAll({ checklistItems: nextItems });
   };
 
   const printManual = (categoryKey) => {
@@ -2330,6 +2497,7 @@ function PosRegister() {
     { key: "history", label: "履歴", icon: History },
     { key: "report", label: "レポート", icon: TrendingUp },
     { key: "manual", label: "マニュアル", icon: BookOpen },
+    { key: "check", label: "チェック", icon: Check },
     { key: "menu", label: "品目", icon: Settings },
   ];
 
@@ -3068,7 +3236,7 @@ function PosRegister() {
         {tab === "manual" && (
           <div className="p-3 space-y-3">
             <div className="text-[11px] text-slate-400 leading-relaxed">
-              AIとチャットしながら、業務マニュアルを作成できます。分かっていることを書いて送ると、AIが不足している情報を質問し、たたき台のマニュアルを作ってくれます。内容は全端末で共有されます。
+              業務マニュアルを作成できます。「開店・閉店作業」「接客・オーダー対応」「発注・在庫管理」はAIとチャットしながら、「回転作業」と「メニュー別」は直接書いて作成します。内容は全端末で共有されます。
             </div>
 
             <div className="flex gap-1.5 overflow-x-auto">
@@ -3084,88 +3252,333 @@ function PosRegister() {
                   {c.label}
                 </button>
               ))}
+              <button
+                onClick={() => setManualCategory(MENU_MANUAL_VIEW_KEY)}
+                className={
+                  "shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold border " +
+                  (manualCategory === MENU_MANUAL_VIEW_KEY ? "bg-amber-400 text-slate-900 border-amber-500" : "bg-slate-800 border-slate-700 text-slate-300")
+                }
+              >
+                メニュー別
+              </button>
             </div>
 
-            {(() => {
-              const current = manuals[manualCategory] || { messages: [], content: "", updatedAt: null };
-              const categoryInfo = MANUAL_CATEGORIES.find((c) => c.key === manualCategory);
-              return (
-                <>
-                  <div className="bg-slate-800 rounded-lg border border-slate-700 p-3">
-                    <div className="flex items-center justify-between mb-1.5">
-                      <div className="text-amber-400 text-xs font-bold tracking-widest">現在のマニュアル案</div>
-                      {current.updatedAt && <div className="text-[10px] text-slate-500">更新: {timeLabel(current.updatedAt)}</div>}
+            {manualCategory === MENU_MANUAL_VIEW_KEY ? (
+              <div className="space-y-3">
+                <div className="text-[11px] text-slate-400 leading-relaxed">
+                  メニューごとの作り方・提供手順を直接入力できます。品目を選んで編集してください。
+                </div>
+                {CATEGORY_ORDER.map((cat) => {
+                  const items = menuItems.filter((m) => m.category === cat);
+                  if (items.length === 0) return null;
+                  return (
+                    <div key={cat}>
+                      <div className="text-amber-400 text-xs font-bold tracking-widest mb-1.5">{cat}</div>
+                      <div className="space-y-1.5">
+                        {items.map((item) => {
+                          const mm = menuManuals[item.id];
+                          const isEditing = editingMenuManualId === item.id;
+                          return (
+                            <div key={item.id} className="bg-slate-800 rounded-lg border border-slate-700 p-2.5">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="text-sm font-bold">{item.name}</div>
+                                {!isEditing && (
+                                  <button
+                                    onClick={() => startEditMenuManual(item.id)}
+                                    className="shrink-0 text-[11px] bg-slate-700 rounded px-2 py-1"
+                                  >
+                                    {mm && mm.content ? "編集" : "作成"}
+                                  </button>
+                                )}
+                              </div>
+                              {!isEditing && mm && mm.content && (
+                                <div className="text-xs text-stone-300 whitespace-pre-wrap leading-relaxed mt-1.5">{mm.content}</div>
+                              )}
+                              {isEditing && (
+                                <div className="mt-2 space-y-1.5">
+                                  <textarea
+                                    value={menuManualDraft}
+                                    onChange={(e) => setMenuManualDraft(e.target.value)}
+                                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-sm resize-none"
+                                    rows={4}
+                                    placeholder="作り方・提供手順を入力…"
+                                  />
+                                  <div className="flex gap-2">
+                                    <button
+                                      onClick={() => saveMenuManual(item.id)}
+                                      className="flex-1 bg-amber-500 text-slate-900 rounded-lg py-1.5 text-xs font-bold"
+                                    >
+                                      保存
+                                    </button>
+                                    <button
+                                      onClick={cancelEditMenuManual}
+                                      className="flex-1 bg-slate-700 text-stone-100 rounded-lg py-1.5 text-xs font-bold"
+                                    >
+                                      キャンセル
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
-                    {current.content ? (
-                      <>
-                        <div className="text-xs text-stone-200 whitespace-pre-wrap leading-relaxed max-h-64 overflow-y-auto">{current.content}</div>
-                        <div className="flex gap-2 mt-2">
-                          <button
-                            onClick={() => copyManualText(manualCategory)}
-                            className="flex-1 bg-slate-700 text-stone-100 rounded-lg py-1.5 text-xs font-bold flex items-center justify-center gap-1"
-                          >
-                            <Copy size={12} /> コピー
-                          </button>
-                          <button
-                            onClick={() => printManual(manualCategory)}
-                            className="flex-1 bg-slate-700 text-stone-100 rounded-lg py-1.5 text-xs font-bold flex items-center justify-center gap-1"
-                          >
-                            印刷
-                          </button>
-                        </div>
-                      </>
-                    ) : (
-                      <div className="text-slate-500 text-xs text-center py-4">下のチャットで「{categoryInfo.hint}」について教えてください</div>
-                    )}
-                  </div>
-
-                  <div className="bg-slate-800/60 rounded-lg border border-slate-700 p-3 space-y-2">
-                    <div className="text-teal-300 text-xs font-bold tracking-widest">AIとのチャット</div>
-                    <div className="space-y-2 max-h-72 overflow-y-auto">
-                      {current.messages.length === 0 && !manualPendingMsg && (
+                  );
+                })}
+              </div>
+            ) : (
+              (() => {
+                const current = manuals[manualCategory] || { messages: [], content: "", updatedAt: null };
+                const categoryInfo = MANUAL_CATEGORIES.find((c) => c.key === manualCategory);
+                const isManualMode = categoryInfo && categoryInfo.mode === "manual";
+                return (
+                  <>
+                    <div className="bg-slate-800 rounded-lg border border-slate-700 p-3">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <div className="text-amber-400 text-xs font-bold tracking-widest">現在のマニュアル案</div>
+                        {current.updatedAt && <div className="text-[10px] text-slate-500">更新: {timeLabel(current.updatedAt)}</div>}
+                      </div>
+                      {current.content ? (
+                        <>
+                          <div className="text-xs text-stone-200 whitespace-pre-wrap leading-relaxed max-h-64 overflow-y-auto">{current.content}</div>
+                          <div className="flex gap-2 mt-2">
+                            <button
+                              onClick={() => copyManualText(manualCategory)}
+                              className="flex-1 bg-slate-700 text-stone-100 rounded-lg py-1.5 text-xs font-bold flex items-center justify-center gap-1"
+                            >
+                              <Copy size={12} /> コピー
+                            </button>
+                            <button
+                              onClick={() => printManual(manualCategory)}
+                              className="flex-1 bg-slate-700 text-stone-100 rounded-lg py-1.5 text-xs font-bold flex items-center justify-center gap-1"
+                            >
+                              印刷
+                            </button>
+                          </div>
+                        </>
+                      ) : (
                         <div className="text-slate-500 text-xs text-center py-4">
-                          例：「開店は7時から。まず換気して、レジを開けて…」のように、分かる範囲で書いてください
+                          {isManualMode ? `下の入力欄に「${categoryInfo.hint}」を書いてください` : `下のチャットで「${categoryInfo.hint}」について教えてください`}
                         </div>
                       )}
-                      {current.messages.map((m, i) => (
-                        <div
-                          key={i}
-                          className={
-                            "rounded-lg px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed " +
-                            (m.role === "user" ? "bg-amber-900/30 text-amber-100 ml-6" : "bg-slate-900 text-stone-200 mr-6")
-                          }
-                        >
-                          {m.content}
-                        </div>
-                      ))}
-                      {manualPendingMsg && (
-                        <div className="rounded-lg px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed bg-amber-900/30 text-amber-100 ml-6">
-                          {manualPendingMsg}
-                        </div>
-                      )}
-                      {manualSending && <div className="text-slate-500 text-xs px-3">AIが考えています…</div>}
                     </div>
-                    {manualError && <div className="text-rose-300 text-xs">{manualError}</div>}
-                    <div className="flex gap-2">
-                      <textarea
-                        value={manualDraftInput}
-                        onChange={(e) => setManualDraftInput(e.target.value)}
-                        placeholder="ここに入力…"
-                        className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-sm resize-none"
-                        rows={2}
-                      />
+
+                    {isManualMode ? (
+                      <div className="bg-slate-800/60 rounded-lg border border-slate-700 p-3 space-y-2">
+                        <div className="text-teal-300 text-xs font-bold tracking-widest">マニュアルを編集</div>
+                        <textarea
+                          value={manualTextDraft}
+                          onChange={(e) => setManualTextDraft(e.target.value)}
+                          placeholder="ここに直接マニュアルを書いてください…"
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-sm resize-none"
+                          rows={8}
+                        />
+                        <button onClick={saveManualText} className="w-full bg-amber-500 text-slate-900 rounded-lg py-2 text-sm font-bold">
+                          保存する
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="bg-slate-800/60 rounded-lg border border-slate-700 p-3 space-y-2">
+                        <div className="text-teal-300 text-xs font-bold tracking-widest">AIとのチャット</div>
+                        <div className="space-y-2 max-h-72 overflow-y-auto">
+                          {current.messages.length === 0 && !manualPendingMsg && (
+                            <div className="text-slate-500 text-xs text-center py-4">
+                              例：「開店は7時から。まず換気して、レジを開けて…」のように、分かる範囲で書いてください
+                            </div>
+                          )}
+                          {current.messages.map((m, i) => (
+                            <div
+                              key={i}
+                              className={
+                                "rounded-lg px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed " +
+                                (m.role === "user" ? "bg-amber-900/30 text-amber-100 ml-6" : "bg-slate-900 text-stone-200 mr-6")
+                              }
+                            >
+                              {m.content}
+                            </div>
+                          ))}
+                          {manualPendingMsg && (
+                            <div className="rounded-lg px-3 py-2 text-xs whitespace-pre-wrap leading-relaxed bg-amber-900/30 text-amber-100 ml-6">
+                              {manualPendingMsg}
+                            </div>
+                          )}
+                          {manualSending && <div className="text-slate-500 text-xs px-3">AIが考えています…</div>}
+                        </div>
+                        {manualError && <div className="text-rose-300 text-xs">{manualError}</div>}
+                        <div className="flex gap-2">
+                          <textarea
+                            value={manualDraftInput}
+                            onChange={(e) => setManualDraftInput(e.target.value)}
+                            placeholder="ここに入力…"
+                            className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-sm resize-none"
+                            rows={2}
+                          />
+                          <button
+                            onClick={sendManualChat}
+                            disabled={manualSending || !manualDraftInput.trim()}
+                            className="bg-amber-500 text-slate-900 rounded-lg px-3 text-sm font-bold disabled:opacity-50 flex items-center justify-center"
+                          >
+                            <Send size={16} />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                );
+              })()
+            )}
+          </div>
+        )}
+
+        {tab === "check" && (
+          <div className="p-3 space-y-3">
+            <div className="text-[11px] text-slate-400 leading-relaxed">
+              開店・閉店作業をチェックして記録します。写真を添付すると、他のスタッフや店長もあとから確認できます（記録は直近14日分を保持します）。
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => setChecklistType("open")}
+                className={
+                  "flex-1 py-2 rounded-lg text-sm font-bold border " +
+                  (checklistType === "open" ? "bg-amber-400 text-slate-900 border-amber-500" : "bg-slate-800 border-slate-700 text-slate-300")
+                }
+              >
+                開店チェック
+              </button>
+              <button
+                onClick={() => setChecklistType("close")}
+                className={
+                  "flex-1 py-2 rounded-lg text-sm font-bold border " +
+                  (checklistType === "close" ? "bg-amber-400 text-slate-900 border-amber-500" : "bg-slate-800 border-slate-700 text-slate-300")
+                }
+              >
+                閉店チェック
+              </button>
+            </div>
+
+            <input
+              value={checklistStaffDraft}
+              onChange={(e) => setChecklistStaffDraft(e.target.value)}
+              placeholder="担当者名（任意）"
+              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-sm"
+            />
+
+            <div className="space-y-2">
+              {(checklistItems[checklistType] || []).map((item) => {
+                const todayEntry = checklistLogs.find((l) => l.date === todayYmd() && l.type === checklistType && l.item === item);
+                const done = todayEntry ? todayEntry.done : false;
+                const photo = todayEntry ? todayEntry.photo : null;
+                return (
+                  <div key={item} className="bg-slate-800 rounded-lg border border-slate-700 p-2.5">
+                    <div className="flex items-center gap-2">
                       <button
-                        onClick={sendManualChat}
-                        disabled={manualSending || !manualDraftInput.trim()}
-                        className="bg-amber-500 text-slate-900 rounded-lg px-3 text-sm font-bold disabled:opacity-50 flex items-center justify-center"
+                        onClick={() => toggleChecklistDone(item, done)}
+                        className={
+                          "w-6 h-6 rounded-md flex items-center justify-center shrink-0 border " +
+                          (done ? "bg-emerald-500 border-emerald-500" : "bg-slate-900 border-slate-600")
+                        }
                       >
-                        <Send size={16} />
+                        {done && <Check size={14} />}
+                      </button>
+                      <div className="flex-1 text-sm">{item}</div>
+                      <label className="shrink-0 text-[11px] bg-slate-700 rounded px-2 py-1.5 cursor-pointer">
+                        写真
+                        <input
+                          type="file"
+                          accept="image/*"
+                          capture="environment"
+                          className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files[0];
+                            e.target.value = "";
+                            handleChecklistPhoto(item, f);
+                          }}
+                        />
+                      </label>
+                      <button onClick={() => removeChecklistItem(item)} className="shrink-0 text-rose-400">
+                        <X size={14} />
                       </button>
                     </div>
+                    {photo && (
+                      <div className="mt-2 flex items-center gap-2">
+                        <img
+                          src={photo}
+                          onClick={() => window.open(photo, "_blank")}
+                          className="w-16 h-16 object-cover rounded-lg cursor-pointer border border-slate-600"
+                        />
+                        <button onClick={() => removeChecklistPhoto(item)} className="text-[11px] text-rose-300">
+                          写真を削除
+                        </button>
+                      </div>
+                    )}
                   </div>
-                </>
-              );
-            })()}
+                );
+              })}
+            </div>
+
+            <div className="flex gap-2">
+              <input
+                value={checklistNewItemDraft}
+                onChange={(e) => setChecklistNewItemDraft(e.target.value)}
+                placeholder="項目を追加…"
+                className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-sm"
+              />
+              <button onClick={addChecklistItem} className="bg-slate-700 text-stone-100 rounded-lg px-3 text-sm font-bold">
+                追加
+              </button>
+            </div>
+
+            <div>
+              <div className="text-amber-400 text-xs font-bold tracking-widest mb-1.5">過去の記録（直近14日）</div>
+              {(() => {
+                const days = Array.from(new Set(checklistLogs.map((l) => l.date))).sort((a, b) => {
+                  const ta = Math.max(...checklistLogs.filter((l) => l.date === a).map((l) => l.time));
+                  const tb = Math.max(...checklistLogs.filter((l) => l.date === b).map((l) => l.time));
+                  return tb - ta;
+                });
+                if (days.length === 0) return <div className="text-slate-500 text-sm text-center py-4">まだ記録がありません</div>;
+                return days.map((d) => (
+                  <div key={d} className="bg-slate-800 rounded-lg border border-slate-700 p-2.5 mb-2">
+                    <div className="text-xs font-bold text-slate-300 mb-1">{d}</div>
+                    {["open", "close"].map((t) => {
+                      const entries = checklistLogs.filter((l) => l.date === d && l.type === t);
+                      if (entries.length === 0) return null;
+                      return (
+                        <div key={t} className="mb-1.5">
+                          <div className="text-[10px] text-slate-500">
+                            {t === "open" ? "開店" : "閉店"}
+                            {entries[0].staff ? `・${entries[0].staff}` : ""}
+                          </div>
+                          <div className="flex flex-wrap gap-1.5 mt-1">
+                            {entries.map((e) => (
+                              <div
+                                key={e.id}
+                                className={
+                                  "text-[10px] rounded px-1.5 py-1 flex items-center gap-1 " +
+                                  (e.done ? "bg-emerald-900/40 text-emerald-200" : "bg-slate-900 text-slate-400")
+                                }
+                              >
+                                {e.done && <Check size={10} />}
+                                {e.item}
+                                {e.photo && (
+                                  <img
+                                    src={e.photo}
+                                    onClick={() => window.open(e.photo, "_blank")}
+                                    className="w-6 h-6 object-cover rounded cursor-pointer"
+                                  />
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ));
+              })()}
+            </div>
           </div>
         )}
 
