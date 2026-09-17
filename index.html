@@ -973,6 +973,12 @@ function pruneChecklistLogs(logs) {
   const cutoff = Date.now() - CHECKLIST_RETENTION_DAYS * 24 * 60 * 60 * 1000;
   return logs.filter((l) => l.time >= cutoff);
 }
+// 小銭から数えられるよう、金額の小さい順に並べる
+const CASH_DENOMINATIONS = [1, 5, 10, 50, 100, 500, 1000, 5000, 10000];
+function calcCashTotal(breakdown) {
+  if (!breakdown) return 0;
+  return CASH_DENOMINATIONS.reduce((sum, d) => sum + d * (Number(breakdown[d]) || 0), 0);
+}
 
 function PosRegister() {
   const [loading, setLoading] = useState(true);
@@ -1663,6 +1669,16 @@ function PosRegister() {
   };
 
   const toggleChecklistDone = (item, currentDone) => updateChecklistEntry(item, { done: !currentDone });
+
+  const updateChecklistBreakdown = (item, denom, qtyStr, prevBreakdown) => {
+    const nextBreakdown = { ...(prevBreakdown || {}) };
+    if (qtyStr === "") {
+      delete nextBreakdown[denom];
+    } else {
+      nextBreakdown[denom] = Math.max(0, parseInt(qtyStr, 10) || 0);
+    }
+    updateChecklistEntry(item, { breakdown: nextBreakdown, amount: calcCashTotal(nextBreakdown) });
+  };
 
   const handleChecklistPhoto = async (item, file) => {
     if (!file) return;
@@ -3097,7 +3113,8 @@ function PosRegister() {
                 const todayEntry = checklistLogs.find((l) => l.date === todayYmd() && l.type === checklistType && l.item === item);
                 const done = todayEntry ? todayEntry.done : false;
                 const photo = todayEntry ? todayEntry.photo : null;
-                const amount = todayEntry && todayEntry.amount != null ? todayEntry.amount : "";
+                const breakdown = (todayEntry && todayEntry.breakdown) || {};
+                const amount = calcCashTotal(breakdown);
                 return (
                   <div key={item} className="bg-slate-800 rounded-lg border border-slate-700 p-2.5">
                     <div className="flex items-center gap-2">
@@ -3130,17 +3147,28 @@ function PosRegister() {
                       </button>
                     </div>
                     {it.withAmount && (
-                      <div className="mt-2 flex items-center gap-1.5">
-                        <span className="text-[11px] text-slate-400">金額</span>
-                        <span className="text-[11px] text-slate-400">¥</span>
-                        <input
-                          type="number"
-                          inputMode="numeric"
-                          value={amount}
-                          onChange={(e) => updateChecklistEntry(item, { amount: e.target.value })}
-                          placeholder="0"
-                          className="w-28 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm"
-                        />
+                      <div className="mt-2 bg-slate-900/60 rounded-lg p-2">
+                        <div className="text-[10px] text-slate-500 mb-1.5">小銭から数えて、枚数を入力してください</div>
+                        <div className="grid grid-cols-3 gap-1.5">
+                          {CASH_DENOMINATIONS.map((denom) => (
+                            <div key={denom} className="flex items-center gap-1 bg-slate-900 border border-slate-700 rounded px-1.5 py-1">
+                              <span className="text-[10px] text-slate-400 shrink-0">{denom.toLocaleString("ja-JP")}円</span>
+                              <input
+                                type="number"
+                                inputMode="numeric"
+                                min="0"
+                                value={breakdown[denom] != null ? breakdown[denom] : ""}
+                                onChange={(e) => updateChecklistBreakdown(item, denom, e.target.value, breakdown)}
+                                placeholder="0"
+                                className="w-full bg-transparent text-right text-sm min-w-0"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                        <div className="flex items-center justify-between pt-1.5 mt-1.5 border-t border-slate-700">
+                          <span className="text-[11px] text-slate-400">合計</span>
+                          <span className="text-amber-300 font-bold text-sm">¥{amount.toLocaleString("ja-JP")}</span>
+                        </div>
                       </div>
                     )}
                     {photo && (
