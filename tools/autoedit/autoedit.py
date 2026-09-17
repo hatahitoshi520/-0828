@@ -36,8 +36,8 @@ VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".avi", ".mkv"}
 SUBPROCESS_TEXT_KWARGS = {"encoding": "utf-8", "errors": "replace"}
 
 
-def run_ffmpeg(cmd):
-    result = subprocess.run(cmd, capture_output=True, text=True, **SUBPROCESS_TEXT_KWARGS)
+def run_ffmpeg(cmd, cwd=None):
+    result = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd, **SUBPROCESS_TEXT_KWARGS)
     if result.returncode != 0:
         print(result.stderr, file=sys.stderr)
         raise subprocess.CalledProcessError(result.returncode, cmd)
@@ -151,28 +151,34 @@ def render_final(cut_path, srt_path, output_path, vertical, burn_captions):
     if vertical:
         vf_parts.append("scale=1080:1920:force_original_aspect_ratio=increase")
         vf_parts.append("crop=1080:1920")
+
+    # ffmpeg's filter-graph parser treats ':' as an option separator and '\'
+    # as its own escape character, so a Windows path (drive-letter colon,
+    # backslash separators) embedded in the subtitles filter's argument
+    # string is fragile to escape correctly - different ffmpeg builds have
+    # disagreed on the exact escaping needed, and getting it wrong doesn't
+    # just fail cleanly, it silently misparses later filter options too
+    # (seen in practice: "Unable to parse 'original_size' option value").
+    # Sidestep the whole problem: run ffmpeg with its working directory set
+    # to the srt file's folder and reference it by bare filename, which
+    # contains no colons or path separators at all.
+    cwd = None
     if burn_captions:
-        # ffmpeg's filter-graph parser treats ':' as an option separator and
-        # '\' as its own escape character, so a raw Windows path like
-        # "C:\Users\...\file.srt" gets mangled (each backslash eats the next
-        # character, colons split the string apart). Converting the
-        # separators to forward slashes first sidesteps the backslash
-        # problem entirely - Windows accepts '/' in paths just fine - then
-        # only the drive-letter colon needs escaping.
-        escaped = str(srt_path).replace("\\", "/").replace(":", "\\:")
+        srt_path = Path(srt_path)
+        cwd = srt_path.parent
         vf_parts.append(
-            f"subtitles={escaped}:force_style="
+            f"subtitles={srt_path.name}:force_style="
             "'FontName=Noto Sans CJK JP,FontSize=13,PrimaryColour=&H00FFFFFF,"
             "OutlineColour=&H90000000,BorderStyle=3,Outline=2,"
             "Alignment=2,MarginV=90'"
         )
 
-    cmd = ["ffmpeg", "-y", "-i", str(cut_path)]
+    cmd = ["ffmpeg", "-y", "-i", str(Path(cut_path).resolve())]
     if vf_parts:
         cmd += ["-vf", ",".join(vf_parts)]
     cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-            "-c:a", "aac", "-b:a", "128k", str(output_path)]
-    run_ffmpeg(cmd)
+            "-c:a", "aac", "-b:a", "128k", str(Path(output_path).resolve())]
+    run_ffmpeg(cmd, cwd=cwd)
 
 
 def process_video(input_path, out_path, srt_path, args):
