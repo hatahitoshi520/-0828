@@ -24,6 +24,16 @@ from pathlib import Path
 
 from faster_whisper import WhisperModel
 
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".avi", ".mkv"}
+
+
+def run_ffmpeg(cmd):
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(result.stderr, file=sys.stderr)
+        raise subprocess.CalledProcessError(result.returncode, cmd)
+    return result
+
 
 def probe_duration(path):
     out = subprocess.run(
@@ -89,14 +99,14 @@ def cut_silence(input_path, keep_ranges, output_path):
     filter_parts.append(f"{concat_inputs}concat=n={n}:v=1:a=1[outv][outa]")
     filter_complex = ";".join(filter_parts)
 
-    subprocess.run([
+    run_ffmpeg([
         "ffmpeg", "-y", "-i", str(input_path),
         "-filter_complex", filter_complex,
         "-map", "[outv]", "-map", "[outa]",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
         "-c:a", "aac", "-b:a", "128k",
         str(output_path),
-    ], check=True, capture_output=True, text=True)
+    ])
 
 
 def srt_timestamp(t):
@@ -145,14 +155,61 @@ def render_final(cut_path, srt_path, output_path, vertical, burn_captions):
         cmd += ["-vf", ",".join(vf_parts)]
     cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
             "-c:a", "aac", "-b:a", "128k", str(output_path)]
-    subprocess.run(cmd, check=True, capture_output=True, text=True)
+    run_ffmpeg(cmd)
+
+
+def process_video(input_path, out_path, srt_path, args):
+    work_dir = out_path.parent / f".{out_path.stem}_autoedit_tmp"
+    work_dir.mkdir(parents=True, exist_ok=True)
+    cut_path = work_dir / "cut.mp4"
+    srt_path = srt_path or out_path.with_suffix(".srt")
+
+    try:
+        duration = probe_duration(input_path)
+        needs_initial_transcribe = not args.no_cut or not args.no_captions
+        segments = []
+        if needs_initial_transcribe:
+            print(f"[1/4] Transcribing {input_path.name} ...", file=sys.stderr)
+            segments = transcribe(input_path, args.model, args.lang)
+            print(f"      {len(segments)} speech segments found in {duration:.1f}s of source.", file=sys.stderr)
+
+        if args.no_cut:
+            cut_path = input_path
+        else:
+            print("[2/4] Removing silence/dead air ...", file=sys.stderr)
+            keep_ranges = build_keep_ranges(segments, duration)
+            cut_silence(input_path, keep_ranges, cut_path)
+            cut_duration = probe_duration(cut_path)
+            print(f"      {duration:.1f}s -> {cut_duration:.1f}s (removed {duration - cut_duration:.1f}s)", file=sys.stderr)
+
+        if not args.no_captions:
+            print("[3/4] Re-transcribing cut video for caption sync ...", file=sys.stderr)
+            final_segments = transcribe(cut_path, args.model, args.lang) if not args.no_cut else segments
+            write_srt(final_segments, srt_path)
+            print(f"      captions written to {srt_path}", file=sys.stderr)
+
+        print("[4/4] Rendering final video ...", file=sys.stderr)
+        render_final(cut_path, srt_path, out_path, args.vertical, not args.no_captions)
+        print(f"Done: {out_path}", file=sys.stderr)
+    finally:
+        if not args.keep_intermediate:
+            if cut_path != input_path:
+                cut_path.unlink(missing_ok=True)
+            try:
+                work_dir.rmdir()
+            except OSError:
+                pass
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("input", type=Path, help="Raw input video")
-    p.add_argument("--out", type=Path, required=True, help="Final output video path")
-    p.add_argument("--srt", type=Path, default=None, help="Where to save captions (.srt)")
+    p.add_argument("input", type=Path, nargs="?", help="Raw input video (omit when using --input-dir)")
+    p.add_argument("--input-dir", type=Path, default=None,
+                    help="Process every video file in this directory instead of a single file")
+    p.add_argument("--out", type=Path, required=True,
+                    help="Final output video path (single-file mode) or output directory (--input-dir mode)")
+    p.add_argument("--srt", type=Path, default=None,
+                    help="Where to save captions (.srt) - single-file mode only")
     p.add_argument("--lang", default="ja", help="Language code for transcription (default: ja)")
     p.add_argument("--model", default="small", help="faster-whisper model size (tiny/base/small/medium)")
     p.add_argument("--vertical", action="store_true", help="Crop/scale to 1080x1920 (9:16) for Reels/Shorts")
@@ -161,43 +218,38 @@ def main():
     p.add_argument("--keep-intermediate", action="store_true")
     args = p.parse_args()
 
-    work_dir = args.out.parent / f".{args.out.stem}_autoedit_tmp"
-    work_dir.mkdir(parents=True, exist_ok=True)
-    cut_path = work_dir / "cut.mp4"
-    srt_path = args.srt or (args.out.with_suffix(".srt"))
+    if bool(args.input) == bool(args.input_dir):
+        print("error: pass exactly one of <input> or --input-dir", file=sys.stderr)
+        sys.exit(1)
 
-    print(f"[1/4] Transcribing {args.input.name} ...", file=sys.stderr)
-    duration = probe_duration(args.input)
-    segments = transcribe(args.input, args.model, args.lang)
-    print(f"      {len(segments)} speech segments found in {duration:.1f}s of source.", file=sys.stderr)
+    if args.input:
+        process_video(args.input, args.out, args.srt, args)
+        return
 
-    if args.no_cut:
-        cut_path = args.input
-        cut_saved_seconds = 0.0
-    else:
-        print("[2/4] Removing silence/dead air ...", file=sys.stderr)
-        keep_ranges = build_keep_ranges(segments, duration)
-        cut_silence(args.input, keep_ranges, cut_path)
-        cut_duration = probe_duration(cut_path)
-        cut_saved_seconds = duration - cut_duration
-        print(f"      {duration:.1f}s -> {cut_duration:.1f}s (removed {cut_saved_seconds:.1f}s)", file=sys.stderr)
+    args.out.mkdir(parents=True, exist_ok=True)
+    videos = sorted(
+        f for f in args.input_dir.iterdir()
+        if f.is_file() and f.suffix.lower() in VIDEO_EXTENSIONS
+    )
+    if not videos:
+        print(f"error: no video files found in {args.input_dir}", file=sys.stderr)
+        sys.exit(1)
 
-    if not args.no_captions:
-        print("[3/4] Re-transcribing cut video for caption sync ...", file=sys.stderr)
-        final_segments = transcribe(cut_path, args.model, args.lang) if not args.no_cut else segments
-        write_srt(final_segments, srt_path)
-        print(f"      captions written to {srt_path}", file=sys.stderr)
-
-    print("[4/4] Rendering final video ...", file=sys.stderr)
-    render_final(cut_path, srt_path, args.out, args.vertical, not args.no_captions)
-    print(f"Done: {args.out}", file=sys.stderr)
-
-    if not args.keep_intermediate and not args.no_cut:
-        cut_path.unlink(missing_ok=True)
+    print(f"Found {len(videos)} video(s) in {args.input_dir}", file=sys.stderr)
+    succeeded, failed = [], []
+    for i, video in enumerate(videos, 1):
+        out_path = args.out / f"{video.stem}_edited.mp4"
+        print(f"\n=== [{i}/{len(videos)}] {video.name} ===", file=sys.stderr)
         try:
-            work_dir.rmdir()
-        except OSError:
-            pass
+            process_video(video, out_path, None, args)
+            succeeded.append(video.name)
+        except Exception as e:
+            print(f"FAILED on {video.name}: {e}", file=sys.stderr)
+            failed.append(video.name)
+
+    print(f"\nDone: {len(succeeded)} succeeded, {len(failed)} failed.", file=sys.stderr)
+    if failed:
+        print("Failed files:\n  " + "\n  ".join(failed), file=sys.stderr)
 
 
 if __name__ == "__main__":

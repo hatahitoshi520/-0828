@@ -41,6 +41,8 @@ pipeline runs as-is.
 
 ## Usage
 
+Single file:
+
 ```bash
 python3 tools/autoedit/autoedit.py raw_source.mp4 \
   --out reel_final.mp4 \
@@ -48,18 +50,37 @@ python3 tools/autoedit/autoedit.py raw_source.mp4 \
   --lang ja
 ```
 
+Batch mode - process every video in a folder (e.g. a phone's whole camera
+roll dumped into one directory):
+
+```bash
+python3 tools/autoedit/autoedit.py --input-dir raw_videos --out edited_videos --vertical --lang ja
+```
+
+Each `<name>.mp4`/`.mov`/etc. in `raw_videos` becomes
+`edited_videos/<name>_edited.mp4`. One bad/corrupt file doesn't stop the
+rest - failures are logged and summarized at the end (`N succeeded, M
+failed`).
+
 Options:
 
 | Flag | Meaning |
 |---|---|
-| `--out PATH` | Final output video (required) |
-| `--srt PATH` | Where to save captions (default: `<out>.srt`) |
+| `input` | Single raw input video (omit when using `--input-dir`) |
+| `--input-dir DIR` | Process every video file in this directory instead of one file |
+| `--out PATH` | Final output video (single-file mode) or output directory (`--input-dir` mode) (required) |
+| `--srt PATH` | Where to save captions (default: `<out>.srt`) - single-file mode only |
 | `--lang ja` | Transcription language (default `ja`) |
 | `--model small` | `faster-whisper` model size: `tiny`/`base`/`small`/`medium` |
 | `--vertical` | Crop/scale to 1080x1920 for Reels/Shorts/TikTok |
 | `--no-captions` | Skip burning in captions |
 | `--no-cut` | Skip silence removal |
 | `--keep-intermediate` | Keep the intermediate silence-cut file for debugging |
+
+With ~100 videos, expect this to take a while - each file does two
+transcription passes (before and after the silence cut) plus the final
+render. Let it run; it won't need attention until it's done or a file
+fails.
 
 ## Known limitations (be upfront about these)
 
