@@ -152,7 +152,14 @@ def render_final(cut_path, srt_path, output_path, vertical, burn_captions):
         vf_parts.append("scale=1080:1920:force_original_aspect_ratio=increase")
         vf_parts.append("crop=1080:1920")
     if burn_captions:
-        escaped = str(srt_path).replace(":", "\\:")
+        # ffmpeg's filter-graph parser treats ':' as an option separator and
+        # '\' as its own escape character, so a raw Windows path like
+        # "C:\Users\...\file.srt" gets mangled (each backslash eats the next
+        # character, colons split the string apart). Converting the
+        # separators to forward slashes first sidesteps the backslash
+        # problem entirely - Windows accepts '/' in paths just fine - then
+        # only the drive-letter colon needs escaping.
+        escaped = str(srt_path).replace("\\", "/").replace(":", "\\:")
         vf_parts.append(
             f"subtitles={escaped}:force_style="
             "'FontName=Noto Sans CJK JP,FontSize=13,PrimaryColour=&H00FFFFFF,"
