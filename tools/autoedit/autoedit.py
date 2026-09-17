@@ -21,6 +21,7 @@ import json
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from faster_whisper import WhisperModel
@@ -145,6 +146,19 @@ def write_srt(segments, path, max_chars=22):
             idx += 1
     path.write_text("\n".join(lines), encoding="utf-8")
 
+    # On Windows, a file that was just created can occasionally be briefly
+    # unreadable to the next process that opens it (antivirus real-time
+    # scanning is a common cause) - seen in practice as ffmpeg's subtitles
+    # filter reporting "Unable to open" a .srt that Python just finished
+    # writing successfully. Poll for it to actually be openable before
+    # moving on, rather than finding out only when ffmpeg fails.
+    for _ in range(20):
+        try:
+            with open(path, "rb"):
+                break
+        except OSError:
+            time.sleep(0.1)
+
 
 def render_final(cut_path, srt_path, output_path, vertical, burn_captions):
     vf_parts = []
@@ -178,7 +192,19 @@ def render_final(cut_path, srt_path, output_path, vertical, burn_captions):
         cmd += ["-vf", ",".join(vf_parts)]
     cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
             "-c:a", "aac", "-b:a", "128k", str(Path(output_path).resolve())]
-    run_ffmpeg(cmd, cwd=cwd)
+
+    try:
+        run_ffmpeg(cmd, cwd=cwd)
+    except subprocess.CalledProcessError:
+        if not burn_captions:
+            raise
+        # One retry: the same transient Windows file-lock issue the
+        # write_srt() poll above targets can still land in the gap between
+        # that check and ffmpeg's own open() a moment later.
+        print("      render failed, retrying once after a short pause "
+              "(possible transient file lock)...", file=sys.stderr)
+        time.sleep(1.0)
+        run_ffmpeg(cmd, cwd=cwd)
 
 
 def process_video(input_path, out_path, srt_path, args):
