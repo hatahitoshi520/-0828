@@ -21,6 +21,7 @@ import json
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -173,15 +174,23 @@ def render_final(cut_path, srt_path, output_path, vertical, burn_captions):
     # disagreed on the exact escaping needed, and getting it wrong doesn't
     # just fail cleanly, it silently misparses later filter options too
     # (seen in practice: "Unable to parse 'original_size' option value").
-    # Sidestep the whole problem: run ffmpeg with its working directory set
-    # to the srt file's folder and reference it by bare filename, which
-    # contains no colons or path separators at all.
+    # Referencing the file by bare name with ffmpeg's cwd set to its folder
+    # avoids the colon/backslash escaping - but on this user's machine that
+    # still failed ("Unable to open ...srt") whenever the folder itself had
+    # non-ASCII (Japanese) characters in its path, e.g. an output directory
+    # named "喫茶すず_編集済み". Sidestep that too: copy the srt into a
+    # guaranteed ASCII-only temp directory and point ffmpeg's cwd there
+    # instead of the real (possibly Japanese-named) output folder.
     cwd = None
+    temp_srt_dir = None
     if burn_captions:
         srt_path = Path(srt_path)
-        cwd = srt_path.parent
+        temp_srt_dir = Path(tempfile.mkdtemp(prefix="autoedit_srt_"))
+        temp_srt_name = "captions.srt"
+        shutil.copy(srt_path, temp_srt_dir / temp_srt_name)
+        cwd = temp_srt_dir
         vf_parts.append(
-            f"subtitles={srt_path.name}:force_style="
+            f"subtitles={temp_srt_name}:force_style="
             "'FontName=Noto Sans CJK JP,FontSize=13,PrimaryColour=&H00FFFFFF,"
             "OutlineColour=&H90000000,BorderStyle=3,Outline=2,"
             "Alignment=2,MarginV=90'"
@@ -194,17 +203,21 @@ def render_final(cut_path, srt_path, output_path, vertical, burn_captions):
             "-c:a", "aac", "-b:a", "128k", str(Path(output_path).resolve())]
 
     try:
-        run_ffmpeg(cmd, cwd=cwd)
-    except subprocess.CalledProcessError:
-        if not burn_captions:
-            raise
-        # One retry: the same transient Windows file-lock issue the
-        # write_srt() poll above targets can still land in the gap between
-        # that check and ffmpeg's own open() a moment later.
-        print("      render failed, retrying once after a short pause "
-              "(possible transient file lock)...", file=sys.stderr)
-        time.sleep(1.0)
-        run_ffmpeg(cmd, cwd=cwd)
+        try:
+            run_ffmpeg(cmd, cwd=cwd)
+        except subprocess.CalledProcessError:
+            if not burn_captions:
+                raise
+            # One retry: covers any remaining transient Windows file-lock
+            # (e.g. antivirus scanning a just-created file) on top of the
+            # ASCII-temp-dir fix above.
+            print("      render failed, retrying once after a short pause "
+                  "(possible transient file lock)...", file=sys.stderr)
+            time.sleep(1.0)
+            run_ffmpeg(cmd, cwd=cwd)
+    finally:
+        if temp_srt_dir is not None:
+            shutil.rmtree(temp_srt_dir, ignore_errors=True)
 
 
 def process_video(input_path, out_path, srt_path, args):
