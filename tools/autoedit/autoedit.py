@@ -161,63 +161,77 @@ def write_srt(segments, path, max_chars=22):
             time.sleep(0.1)
 
 
-def render_final(cut_path, srt_path, output_path, vertical, burn_captions):
-    vf_parts = []
-    if vertical:
-        vf_parts.append("scale=1080:1920:force_original_aspect_ratio=increase")
-        vf_parts.append("crop=1080:1920")
+def burn_subtitles(video_path, srt_path, output_path):
+    """Burn captions in as the *only* filter in this ffmpeg invocation.
 
-    # ffmpeg's filter-graph parser treats ':' as an option separator and '\'
-    # as its own escape character, so a Windows path (drive-letter colon,
-    # backslash separators) embedded in the subtitles filter's argument
-    # string is fragile to escape correctly - different ffmpeg builds have
-    # disagreed on the exact escaping needed, and getting it wrong doesn't
-    # just fail cleanly, it silently misparses later filter options too
-    # (seen in practice: "Unable to parse 'original_size' option value").
-    # Referencing the file by bare name with ffmpeg's cwd set to its folder
-    # avoids the colon/backslash escaping - but on this user's machine that
-    # still failed ("Unable to open ...srt") whenever the folder itself had
-    # non-ASCII (Japanese) characters in its path, e.g. an output directory
-    # named "喫茶すず_編集済み". Sidestep that too: copy the srt into a
-    # guaranteed ASCII-only temp directory and point ffmpeg's cwd there
-    # instead of the real (possibly Japanese-named) output folder.
-    cwd = None
-    temp_srt_dir = None
-    if burn_captions:
-        srt_path = Path(srt_path)
-        temp_srt_dir = Path(tempfile.mkdtemp(prefix="autoedit_srt_"))
+    This used to be chained together with scale/crop in one -vf string
+    (e.g. "scale=...,crop=...,subtitles=file:force_style='A,B,C'"), which
+    worked fine on Linux/ffmpeg 6.1.1 but consistently failed with
+    "Unable to open ...srt" on the user's Windows machine running ffmpeg
+    9.0.1-full_build (gyan.dev) - even after ruling out escaping and
+    non-ASCII-path theories (colon/backslash escaping, cwd tricks, an
+    ASCII-only temp directory for the srt: none of it helped). Since the
+    one thing that changed between the working and failing case is
+    whether the subtitles filter shares a filter-chain with other comma-
+    separated filters and a comma-containing quoted force_style value,
+    isolating it into its own single-filter pass sidesteps whatever that
+    build-specific parsing difference is, rather than continuing to guess
+    at the "correct" escaping.
+    """
+    srt_path = Path(srt_path)
+    temp_srt_dir = Path(tempfile.mkdtemp(prefix="autoedit_srt_"))
+    try:
         temp_srt_name = "captions.srt"
         shutil.copy(srt_path, temp_srt_dir / temp_srt_name)
-        cwd = temp_srt_dir
-        vf_parts.append(
+        cmd = [
+            "ffmpeg", "-y", "-i", str(Path(video_path).resolve()),
+            "-vf",
             f"subtitles={temp_srt_name}:force_style="
             "'FontName=Noto Sans CJK JP,FontSize=13,PrimaryColour=&H00FFFFFF,"
             "OutlineColour=&H90000000,BorderStyle=3,Outline=2,"
-            "Alignment=2,MarginV=90'"
-        )
-
-    cmd = ["ffmpeg", "-y", "-i", str(Path(cut_path).resolve())]
-    if vf_parts:
-        cmd += ["-vf", ",".join(vf_parts)]
-    cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-            "-c:a", "aac", "-b:a", "128k", str(Path(output_path).resolve())]
-
-    try:
+            "Alignment=2,MarginV=90'",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+            "-c:a", "aac", "-b:a", "128k", str(Path(output_path).resolve()),
+        ]
         try:
-            run_ffmpeg(cmd, cwd=cwd)
+            run_ffmpeg(cmd, cwd=temp_srt_dir)
         except subprocess.CalledProcessError:
-            if not burn_captions:
-                raise
-            # One retry: covers any remaining transient Windows file-lock
-            # (e.g. antivirus scanning a just-created file) on top of the
-            # ASCII-temp-dir fix above.
+            # One retry: covers a transient Windows file-lock (e.g.
+            # antivirus scanning a just-created file).
             print("      render failed, retrying once after a short pause "
                   "(possible transient file lock)...", file=sys.stderr)
             time.sleep(1.0)
-            run_ffmpeg(cmd, cwd=cwd)
+            run_ffmpeg(cmd, cwd=temp_srt_dir)
     finally:
-        if temp_srt_dir is not None:
-            shutil.rmtree(temp_srt_dir, ignore_errors=True)
+        shutil.rmtree(temp_srt_dir, ignore_errors=True)
+
+
+def render_final(cut_path, srt_path, output_path, vertical, burn_captions, work_dir):
+    cut_path = Path(cut_path)
+    output_path = Path(output_path)
+
+    pre_caption_path = cut_path
+    if vertical:
+        pre_caption_path = work_dir / "scaled.mp4" if burn_captions else output_path
+        run_ffmpeg([
+            "ffmpeg", "-y", "-i", str(cut_path.resolve()),
+            "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+            "-c:a", "aac", "-b:a", "128k", str(pre_caption_path.resolve()),
+        ])
+    elif not burn_captions:
+        # Neither transform requested: still need to produce output_path
+        # with consistent encoding settings, so re-encode as a pass-through.
+        run_ffmpeg([
+            "ffmpeg", "-y", "-i", str(cut_path.resolve()),
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+            "-c:a", "aac", "-b:a", "128k", str(output_path.resolve()),
+        ])
+
+    if burn_captions:
+        burn_subtitles(pre_caption_path, srt_path, output_path)
+        if pre_caption_path != cut_path:
+            pre_caption_path.unlink(missing_ok=True)
 
 
 def process_video(input_path, out_path, srt_path, args):
@@ -251,7 +265,7 @@ def process_video(input_path, out_path, srt_path, args):
             print(f"      captions written to {srt_path}", file=sys.stderr)
 
         print("[4/4] Rendering final video ...", file=sys.stderr)
-        render_final(cut_path, srt_path, out_path, args.vertical, not args.no_captions)
+        render_final(cut_path, srt_path, out_path, args.vertical, not args.no_captions, work_dir)
         print(f"Done: {out_path}", file=sys.stderr)
     finally:
         if not args.keep_intermediate:
