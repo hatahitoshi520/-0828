@@ -89,6 +89,22 @@ transcription passes (before and after the silence cut) plus the final
 render. Let it run; it won't need attention until it's done or a file
 fails.
 
+## Making a quick draft reel from clips already edited
+
+While a big batch is still running (or a couple of files are still stuck),
+stitch everything already produced into one rough-cut preview with
+`concat_edited.py`:
+
+```bash
+python3 tools/autoedit/concat_edited.py \
+  --input-dir "C:\Users\81708\Pictures\喫茶すず_編集済み" \
+  --out "C:\Users\81708\Pictures\喫茶すず_編集済み\draft_reel.mp4"
+```
+
+Straight cuts, filename order, all matching `*_edited.mp4` in that folder by
+default. Pass `--limit 10` to preview just the first 10 clips instead of
+the whole batch, or `--pattern` to match a different naming scheme.
+
 ## Known limitations (be upfront about these)
 
 - A clip with **no detected speech at all** (silent B-roll, music-only,
