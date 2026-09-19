@@ -91,6 +91,11 @@ fails.
 
 ## Known limitations (be upfront about these)
 
+- A clip with **no detected speech at all** (silent B-roll, music-only,
+  etc.) gets no burned-in captions - there's nothing to caption, and an
+  empty `.srt` file can't be rendered anyway (ffmpeg's subtitles filter
+  refuses to open a 0-byte `.srt`). Everything else (silence-cut pass,
+  vertical crop) still runs normally for that file.
 - Cuts on **silence**, not on filler words (「えー」「あの」) specifically —
   those are usually followed by a brief pause anyway, so they often get
   swept up in a silence cut, but there's no dedicated filler-word detector.

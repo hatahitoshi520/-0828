@@ -258,14 +258,29 @@ def process_video(input_path, out_path, srt_path, args):
             cut_duration = probe_duration(cut_path)
             print(f"      {duration:.1f}s -> {cut_duration:.1f}s (removed {duration - cut_duration:.1f}s)", file=sys.stderr)
 
+        burn_captions = not args.no_captions
         if not args.no_captions:
             print("[3/4] Re-transcribing cut video for caption sync ...", file=sys.stderr)
             final_segments = transcribe(cut_path, args.model, args.lang) if not args.no_cut else segments
-            write_srt(final_segments, srt_path)
-            print(f"      captions written to {srt_path}", file=sys.stderr)
+            if final_segments:
+                write_srt(final_segments, srt_path)
+                print(f"      captions written to {srt_path}", file=sys.stderr)
+            else:
+                # No speech detected at all (silent/music-only clip). An
+                # empty .srt is not just "no captions" - ffmpeg's subtitles
+                # filter (libass) refuses to even open a 0-byte .srt file
+                # and fails the whole render ("Unable to open ...srt").
+                # Confirmed with a minimal repro (`touch empty.srt` +
+                # `ffmpeg -vf subtitles=empty.srt` -> same error), on Linux,
+                # unrelated to any Windows path/encoding quirk. There's
+                # nothing to caption on a silent clip anyway, so just skip
+                # burning captions for this file instead of writing an
+                # unusable empty .srt.
+                burn_captions = False
+                print("      no speech detected - skipping captions for this clip.", file=sys.stderr)
 
         print("[4/4] Rendering final video ...", file=sys.stderr)
-        render_final(cut_path, srt_path, out_path, args.vertical, not args.no_captions, work_dir)
+        render_final(cut_path, srt_path, out_path, args.vertical, burn_captions, work_dir)
         print(f"Done: {out_path}", file=sys.stderr)
     finally:
         if not args.keep_intermediate:
