@@ -105,6 +105,21 @@ Straight cuts, filename order, all matching `*_edited.mp4` in that folder by
 default. Pass `--limit 10` to preview just the first 10 clips instead of
 the whole batch, or `--pattern` to match a different naming scheme.
 
+To land on a specific total length (e.g. a ~30s draft for Instagram) instead
+of one giant compilation, use `--target-duration`:
+
+```bash
+python3 tools/autoedit/concat_edited.py \
+  --input-dir "C:\Users\81708\Pictures\喫茶すず_編集済み" \
+  --target-duration 30 \
+  --out "C:\Users\81708\Pictures\喫茶すず_編集済み\draft_30s.mp4"
+```
+
+Clips are taken whole, in filename order, until the 30s budget runs low,
+then the last one included is trimmed so the total lands exactly on the
+target. If the available footage adds up to less than the target, it says
+so and uses everything it has.
+
 ## Known limitations (be upfront about these)
 
 - A clip with **no detected speech at all** (silent B-roll, music-only,
