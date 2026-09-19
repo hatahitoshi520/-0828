@@ -1,0 +1,14 @@
+{
+  "raw_dir": "C:/Users/81708/Pictures",
+  "edited_dir": "C:/Users/81708/Pictures/喫茶すず_編集済み",
+  "target_duration_seconds": 30,
+  "lang": "ja",
+
+  "supabase_url": "https://kiaufsuqpjdhihihvbrq.supabase.co",
+  "supabase_bucket": "reels",
+  "supabase_service_key": "PASTE_THE_service_role_KEY_FROM_SUPABASE_DASHBOARD_HERE",
+
+  "ig_user_id": "17841478716095901",
+  "ig_page_token": "PASTE_THE_CURRENT_PAGE_ACCESS_TOKEN_HERE",
+  "caption_template": "喫茶すず\n#喫茶すず #カフェ #cafe"
+}
