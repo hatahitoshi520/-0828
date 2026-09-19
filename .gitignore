@@ -1,2 +1,7 @@
 __pycache__/
 *.pyc
+
+# Secrets and per-machine runtime state for the auto-post pipeline -
+# never commit these (see tools/pipeline/README.md).
+tools/pipeline/config.local.json
+tools/pipeline/posted_state.json
