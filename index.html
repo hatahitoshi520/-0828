@@ -979,6 +979,9 @@ function calcCashTotal(breakdown) {
   if (!breakdown) return 0;
   return CASH_DENOMINATIONS.reduce((sum, d) => sum + d * (Number(breakdown[d]) || 0), 0);
 }
+// 閉店チェックの「引継ぎ・申し送り」は他の項目と違い、チェック＋写真ではなく
+// 自由記述のメモなので、checklistLogs内では特別な item 名で1件だけ管理する
+const HANDOVER_NOTE_ITEM = "引継ぎ・申し送り";
 
 function PosRegister() {
   const [loading, setLoading] = useState(true);
@@ -1045,6 +1048,7 @@ function PosRegister() {
   const [checklistNewItemDraft, setChecklistNewItemDraft] = useState("");
   const [tillBaseline, setTillBaseline] = useState(null); // 開店時にレジへ入れる釣銭の目標額（過不足計算の基準）
   const [tillBaselineDraft, setTillBaselineDraft] = useState("");
+  const [handoverNoteDraft, setHandoverNoteDraft] = useState("");
 
   // ---- Excel自動保存 ----
   const [excelSupported, setExcelSupported] = useState(false);
@@ -1090,6 +1094,10 @@ function PosRegister() {
           applyCloudPayload(parsed);
           if (parsed.storeArea) setStoreAreaDraft(parsed.storeArea);
           if (parsed.tillBaseline != null) setTillBaselineDraft(String(parsed.tillBaseline));
+          const todayHandover = (parsed.checklistLogs || []).find(
+            (l) => l.date === todayYmd() && l.type === "close" && l.item === HANDOVER_NOTE_ITEM
+          );
+          if (todayHandover && todayHandover.note) setHandoverNoteDraft(todayHandover.note);
         } else {
           await window.storage.set(
             STORAGE_KEY,
@@ -1581,6 +1589,19 @@ function PosRegister() {
     if (todayExpenseTotal > 0) {
       lines.push(`本日の経費: ${yen(todayExpenseTotal)}`);
     }
+    ["open", "close"].forEach((t) => {
+      const items = (checklistItems[t] || []).filter((it) => it.text !== HANDOVER_NOTE_ITEM);
+      if (items.length === 0) return;
+      const todayEntries = checklistLogs.filter((l) => l.date === todayYmd() && l.type === t);
+      const notDone = items.filter((it) => {
+        const e = todayEntries.find((en) => en.item === it.text);
+        return !(e && e.done);
+      });
+      const label = t === "open" ? "開店チェック" : "閉店チェック";
+      let line = `${label}: ${items.length - notDone.length}/${items.length}完了`;
+      if (notDone.length) line += `（未: ${notDone.map((it) => it.text).join("、")}）`;
+      lines.push(line);
+    });
     const closeAmountItem = (checklistItems.close || []).find((it) => it.withAmount);
     if (closeAmountItem) {
       const entry = checklistLogs.find((l) => l.date === todayYmd() && l.type === "close" && l.item === closeAmountItem.text);
@@ -1595,6 +1616,10 @@ function PosRegister() {
           lines.push(`レジ金（実測）: ${yen(entry.amount)}（基準額未設定のため過不足は未計算）`);
         }
       }
+    }
+    const handoverEntry = checklistLogs.find((l) => l.date === todayYmd() && l.type === "close" && l.item === HANDOVER_NOTE_ITEM);
+    if (handoverEntry && handoverEntry.note && handoverEntry.note.trim()) {
+      lines.push(`引継ぎ・申し送り: ${handoverEntry.note.trim()}`);
     }
     lines.push("");
     lines.push("本日もお疲れ様でした🌙");
@@ -1699,6 +1724,11 @@ function PosRegister() {
     nextLogs = pruneChecklistLogs(nextLogs);
     setChecklistLogs(nextLogs);
     await persistAll({ checklistLogs: nextLogs });
+  };
+
+  const saveHandoverNote = async () => {
+    await updateChecklistEntry(HANDOVER_NOTE_ITEM, { note: handoverNoteDraft.trim() });
+    showFlash("引継ぎメモを保存しました");
   };
 
   const toggleChecklistDone = (item, currentDone) => updateChecklistEntry(item, { done: !currentDone });
@@ -3267,6 +3297,22 @@ function PosRegister() {
               })}
             </div>
 
+            {checklistType === "close" && (
+              <div className="bg-slate-800/60 rounded-lg border border-dashed border-amber-700 p-2.5 space-y-1.5">
+                <div className="text-amber-300 text-[11px] font-bold tracking-widest">引継ぎ・申し送り（間に合わなかったこと、次の人への連絡事項）</div>
+                <textarea
+                  value={handoverNoteDraft}
+                  onChange={(e) => setHandoverNoteDraft(e.target.value)}
+                  placeholder="例：ゴミ出しが間に合わず、明日の朝にお願いします"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-sm resize-none"
+                  rows={3}
+                />
+                <button onClick={saveHandoverNote} className="w-full bg-amber-600 text-slate-900 rounded-lg py-1.5 text-sm font-bold">
+                  保存
+                </button>
+              </div>
+            )}
+
             <div className="flex gap-2">
               <input
                 value={checklistNewItemDraft}
@@ -3301,27 +3347,35 @@ function PosRegister() {
                             {entries[0].staff ? `・${entries[0].staff}` : ""}
                           </div>
                           <div className="flex flex-wrap gap-1.5 mt-1">
-                            {entries.map((e) => (
-                              <div
-                                key={e.id}
-                                className={
-                                  "text-[10px] rounded px-1.5 py-1 flex items-center gap-1 " +
-                                  (e.done ? "bg-emerald-900/40 text-emerald-200" : "bg-slate-900 text-slate-400")
-                                }
-                              >
-                                {e.done && <Check size={10} />}
-                                {e.item}
-                                {e.amount != null && e.amount !== "" && <span className="text-amber-300">¥{e.amount}</span>}
-                                {e.photo && (
-                                  <img
-                                    src={e.photo}
-                                    onClick={() => window.open(e.photo, "_blank")}
-                                    className="w-6 h-6 object-cover rounded cursor-pointer"
-                                  />
-                                )}
-                              </div>
-                            ))}
+                            {entries
+                              .filter((e) => e.item !== HANDOVER_NOTE_ITEM)
+                              .map((e) => (
+                                <div
+                                  key={e.id}
+                                  className={
+                                    "text-[10px] rounded px-1.5 py-1 flex items-center gap-1 " +
+                                    (e.done ? "bg-emerald-900/40 text-emerald-200" : "bg-slate-900 text-slate-400")
+                                  }
+                                >
+                                  {e.done && <Check size={10} />}
+                                  {e.item}
+                                  {e.amount != null && e.amount !== "" && <span className="text-amber-300">¥{e.amount}</span>}
+                                  {e.photo && (
+                                    <img
+                                      src={e.photo}
+                                      onClick={() => window.open(e.photo, "_blank")}
+                                      className="w-6 h-6 object-cover rounded cursor-pointer"
+                                    />
+                                  )}
+                                </div>
+                              ))}
                           </div>
+                          {(() => {
+                            const handover = entries.find((e) => e.item === HANDOVER_NOTE_ITEM && e.note && e.note.trim());
+                            return handover ? (
+                              <div className="text-[10px] text-amber-300 mt-1">引継ぎ: {handover.note}</div>
+                            ) : null;
+                          })()}
                         </div>
                       );
                     })}
