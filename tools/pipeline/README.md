@@ -32,7 +32,7 @@ never-repeated Reel each time there's enough new material.
    | `edited_dir` | Where autoedit.py's output goes (same as your existing batch runs) |
    | `target_duration_seconds` | How long each posted draft should be (default 30) |
    | `supabase_url` | Already filled in - the `hatahitoshi0520@icloud.com` Supabase project. A public `reels` storage bucket has already been created there for this. |
-   | `supabase_service_key` | Supabase dashboard -> that project -> Project Settings -> API -> `service_role` key. **Secret** - bypasses all access rules, keep it only in this local file. |
+   | `supabase_service_key` | Supabase dashboard -> that project -> Project Settings -> API. Use the **Legacy API Keys** section's `service_role` key (the long `eyJhbGci...` JWT string) - **not** the newer `sb_secret_...` key from the "API Keys" section. This project's storage endpoint currently rejects the new key format with `Invalid Compact JWS`. **Secret** - bypasses all access rules, keep it only in this local file. |
    | `ig_user_id` | Already filled in (`17841478716095901`, see `docs/instagram-setup.md`) |
    | `ig_page_token` | The current page access token - see "Regenerating the page access token" in `docs/instagram-setup.md`. **Expires roughly every 60 days** - when the pipeline starts failing at the publish step, this is almost always why. |
    | `caption_template` | Fixed caption/hashtags used on every post - edit to taste |
