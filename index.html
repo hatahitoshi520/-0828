@@ -14,6 +14,8 @@
   onerror="this.onerror=null;var s=document.createElement('script');s.src='https://unpkg.com/@babel/standalone@7/babel.min.js';document.head.appendChild(s);"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"
   onerror="this.onerror=null;var s=document.createElement('script');s.src='https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js';document.head.appendChild(s);"></script>
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"
+  onerror="this.onerror=null;var s=document.createElement('script');s.src='https://unpkg.com/sortablejs@1.15.2/Sortable.min.js';document.head.appendChild(s);"></script>
 
 <style>
   html, body { margin: 0; padding: 0; background: #0f172a; }
@@ -260,6 +262,22 @@ const Upload = (p) => (
 );
 const AlertCircle = (p) => (
   <Icon {...p}><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></Icon>
+);
+const GripVertical = (p) => (
+  <Icon {...p}>
+    <circle cx="9" cy="6" r="1.2" fill="currentColor" stroke="none" />
+    <circle cx="9" cy="12" r="1.2" fill="currentColor" stroke="none" />
+    <circle cx="9" cy="18" r="1.2" fill="currentColor" stroke="none" />
+    <circle cx="15" cy="6" r="1.2" fill="currentColor" stroke="none" />
+    <circle cx="15" cy="12" r="1.2" fill="currentColor" stroke="none" />
+    <circle cx="15" cy="18" r="1.2" fill="currentColor" stroke="none" />
+  </Icon>
+);
+const Camera = (p) => (
+  <Icon {...p}>
+    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+    <circle cx="12" cy="13" r="4" />
+  </Icon>
 );
 
 
@@ -565,7 +583,7 @@ async function analyzeReceiptImage(dataUrl) {
 
 数値は必ず算用数字のみとし、憶測で埋めず読み取れない項目は指示通り空にしてください。`;
   const data = await callAnthropicMessages({
-    model: "claude-sonnet-4-6",
+    model: "claude-sonnet-5",
     max_tokens: 500,
     messages: [
       {
@@ -926,7 +944,7 @@ ${
 全体で600字以内。断定口調ではなく、プロとしての助言として書いてください。`;
 
   const data = await callAnthropicMessages({
-    model: "claude-sonnet-4-6",
+    model: "claude-sonnet-5",
     max_tokens: 1500,
     messages: [{ role: "user", content: prompt }],
     tools: areaLine ? [{ type: "web_search_20250305", name: "web_search" }] : undefined,
@@ -1049,6 +1067,10 @@ function PosRegister() {
   const [tillBaseline, setTillBaseline] = useState(null); // 開店時にレジへ入れる釣銭の目標額（過不足計算の基準）
   const [tillBaselineDraft, setTillBaselineDraft] = useState("");
   const [handoverNoteDraft, setHandoverNoteDraft] = useState("");
+  const checklistListRef = useRef(null);
+
+  // ---- 領収書ライブスキャン ----
+  const [liveScannerOpen, setLiveScannerOpen] = useState(false);
 
   // ---- Excel自動保存 ----
   const [excelSupported, setExcelSupported] = useState(false);
@@ -1779,6 +1801,33 @@ function PosRegister() {
     await persistAll({ checklistItems: nextItems });
   };
 
+  // チェックリストの項目を長押しでドラッグして並び替えられるようにする
+  // （スマホでは長押し(delay)しないとドラッグが始まらないようにして、
+  // 通常のタップ・スクロール操作と衝突しないようにしている）
+  useEffect(() => {
+    if (tab !== "check" || !checklistListRef.current || typeof Sortable === "undefined") return;
+    const sortable = Sortable.create(checklistListRef.current, {
+      handle: ".chk-drag-handle",
+      animation: 150,
+      delay: 150,
+      delayOnTouchOnly: true,
+      touchStartThreshold: 5,
+      onEnd: (evt) => {
+        if (evt.oldIndex === evt.newIndex) return;
+        setChecklistItems((prev) => {
+          const list = [...(prev[checklistType] || [])];
+          const [moved] = list.splice(evt.oldIndex, 1);
+          list.splice(evt.newIndex, 0, moved);
+          const nextItems = { ...prev, [checklistType]: list };
+          persistAll({ checklistItems: nextItems });
+          return nextItems;
+        });
+      },
+    });
+    return () => sortable.destroy();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, checklistType, (checklistItems[checklistType] || []).map((i) => i.text).join("|")]);
+
   const grouped = useMemo(
     () =>
       CATEGORY_ORDER.map((cat) => ({ cat, items: menuItems.filter((m) => m.category === cat) })).filter(
@@ -2115,6 +2164,24 @@ function PosRegister() {
           q.map((x) => (x.id === id ? { ...x, status: "error", error: "自動読み取りに失敗しました。手入力してください。" } : x))
         );
       }
+    }
+  };
+
+  // カメラのライブ映像から自動撮影した1枚を、まとめ撮影と同じキュー・解析処理に乗せる
+  const handleReceiptCaptured = async (dataUrl) => {
+    const id = genId("rq");
+    setReceiptQueue((q) => [
+      ...q,
+      { id, photo: dataUrl, date: "", cat: "", name: "", amount: "", receiptNo: "", status: "analyzing", error: "" },
+    ]);
+    try {
+      const parsed = await analyzeReceiptImage(dataUrl);
+      setReceiptQueue((q) => q.map((x) => (x.id === id ? { ...x, ...parsed, status: "done" } : x)));
+    } catch (err) {
+      console.error("receipt analyze failed", err);
+      setReceiptQueue((q) =>
+        q.map((x) => (x.id === id ? { ...x, status: "error", error: "自動読み取りに失敗しました。手入力してください。" } : x))
+      );
     }
   };
 
@@ -2859,6 +2926,12 @@ function PosRegister() {
               <div className="text-[11px] text-slate-400 leading-relaxed">
                 複数枚まとめて選択できます。AIが内容を読み取りますが、金額・日付・カテゴリは必ず確認してから登録してください（読み取りに失敗した場合は手入力用のフォームに切り替わります）。
               </div>
+              <button
+                onClick={() => setLiveScannerOpen(true)}
+                className="w-full bg-amber-600 text-slate-900 rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-1.5"
+              >
+                <Camera size={14} /> カメラでスキャン（自動で1枚撮影）
+              </button>
               <label className="w-full bg-teal-700 text-white rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-1.5 cursor-pointer">
                 <Upload size={14} /> 領収書を撮影・まとめて選択する
                 <input type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={handleReceiptFilesSelected} />
@@ -3190,7 +3263,7 @@ function PosRegister() {
               className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-sm"
             />
 
-            <div className="space-y-2">
+            <div className="space-y-2" ref={checklistListRef}>
               {(checklistItems[checklistType] || []).map((it) => {
                 const item = it.text;
                 const todayEntry = checklistLogs.find((l) => l.date === todayYmd() && l.type === checklistType && l.item === item);
@@ -3201,6 +3274,9 @@ function PosRegister() {
                 return (
                   <div key={item} className="bg-slate-800 rounded-lg border border-slate-700 p-2.5">
                     <div className="flex items-center gap-2">
+                      <div className="chk-drag-handle shrink-0 text-slate-500 cursor-grab active:cursor-grabbing p-1 -ml-1" title="長押しで並び替え">
+                        <GripVertical size={16} />
+                      </div>
                       <button
                         onClick={() => toggleChecklistDone(item, done)}
                         className={
@@ -3554,6 +3630,16 @@ function PosRegister() {
         )}
       </main>
 
+      {liveScannerOpen && (
+        <ReceiptLiveScanner
+          onCapture={(dataUrl) => {
+            setLiveScannerOpen(false);
+            handleReceiptCaptured(dataUrl);
+          }}
+          onClose={() => setLiveScannerOpen(false)}
+        />
+      )}
+
       {modalItem && (
         <div className="fixed inset-0 bg-black/60 flex items-end z-20" onClick={() => setModalItem(null)}>
           <div
@@ -3758,6 +3844,131 @@ function PosRegister() {
           </button>
         ))}
       </nav>
+    </div>
+  );
+}
+
+/* ============================================================
+   領収書ライブスキャン
+   ------------------------------------------------------------
+   カメラ映像を表示し続け、映像が一定時間動かなくなったら
+   （＝レシートを枠に合わせて静止させたら）自動で1枚だけ撮影する。
+   一定間隔でAIに送り続けるとAPI利用料がかさむため、AI解析は
+   撮影した1枚だけに対して行う（手動の「今すぐ撮影」ボタンも用意）。
+   ============================================================ */
+function ReceiptLiveScanner({ onCapture, onClose }) {
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const prevFrameRef = useRef(null);
+  const stableCountRef = useRef(0);
+  const capturedRef = useRef(false);
+  const [status, setStatus] = useState("starting"); // starting | live | error
+  const [errorMsg, setErrorMsg] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setErrorMsg("このブラウザはカメラのライブ表示に対応していません。下の通常の撮影方法をお使いください。");
+        setStatus("error");
+        return;
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "environment" } },
+          audio: false,
+        });
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play().catch(() => {});
+        }
+        setStatus("live");
+      } catch (e) {
+        console.error("camera start failed", e);
+        setErrorMsg("カメラを起動できませんでした。カメラの使用を許可しているか確認してください。");
+        setStatus("error");
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
+    };
+  }, []);
+
+  const doCapture = useCallback(() => {
+    if (capturedRef.current) return;
+    const video = videoRef.current;
+    if (!video || !video.videoWidth) return;
+    capturedRef.current = true;
+    const maxW = 900;
+    const scale = Math.min(1, maxW / video.videoWidth);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(video.videoWidth * scale);
+    canvas.height = Math.round(video.videoHeight * scale);
+    canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.82);
+    if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
+    onCapture(dataUrl);
+  }, [onCapture]);
+
+  // 映像が静止しているかを、縮小した画像の明るさの変化量で簡易判定する
+  useEffect(() => {
+    if (status !== "live") return;
+    const checkCanvas = document.createElement("canvas");
+    checkCanvas.width = 48;
+    checkCanvas.height = 48;
+    const ctx = checkCanvas.getContext("2d");
+    const interval = setInterval(() => {
+      const video = videoRef.current;
+      if (!video || !video.videoWidth || capturedRef.current) return;
+      ctx.drawImage(video, 0, 0, 48, 48);
+      const frame = ctx.getImageData(0, 0, 48, 48).data;
+      if (prevFrameRef.current) {
+        let diff = 0;
+        for (let i = 0; i < frame.length; i += 4) diff += Math.abs(frame[i] - prevFrameRef.current[i]);
+        const avgDiff = diff / (frame.length / 4);
+        stableCountRef.current = avgDiff < 6 ? stableCountRef.current + 1 : 0;
+        if (stableCountRef.current >= 3) doCapture();
+      }
+      prevFrameRef.current = frame;
+    }, 350);
+    return () => clearInterval(interval);
+  }, [status, doCapture]);
+
+  return (
+    <div className="fixed inset-0 bg-black z-30 flex flex-col">
+      <div className="flex items-center justify-between p-3 text-white shrink-0">
+        <div className="text-sm font-bold">領収書スキャン</div>
+        <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full bg-white/20">
+          <X size={18} />
+        </button>
+      </div>
+      <div className="relative flex-1 overflow-hidden bg-slate-900">
+        <video ref={videoRef} playsInline muted className="w-full h-full object-cover" />
+        {status === "live" && <div className="absolute inset-6 border-2 border-amber-400 rounded-xl pointer-events-none" />}
+        {status === "error" && (
+          <div className="absolute inset-0 flex items-center justify-center p-6">
+            <div className="text-rose-300 text-sm text-center">{errorMsg}</div>
+          </div>
+        )}
+      </div>
+      <div className="p-4 text-center text-white space-y-3 shrink-0">
+        <div className="text-xs text-slate-300">
+          {status === "starting" && "カメラを起動しています…"}
+          {status === "live" && "レシートを枠に合わせて、動かさずに持ってください。自動で撮影します"}
+          {status === "error" && "通常の撮影方法（写真を選ぶ）をお使いください"}
+        </div>
+        {status === "live" && (
+          <button onClick={doCapture} className="w-full bg-amber-500 text-slate-900 rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-1.5">
+            <Camera size={16} /> 今すぐ撮影する
+          </button>
+        )}
+      </div>
     </div>
   );
 }
