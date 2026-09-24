@@ -1043,6 +1043,8 @@ function PosRegister() {
   const [checklistType, setChecklistType] = useState("open");
   const [checklistStaffDraft, setChecklistStaffDraft] = useState("");
   const [checklistNewItemDraft, setChecklistNewItemDraft] = useState("");
+  const [tillBaseline, setTillBaseline] = useState(null); // 開店時にレジへ入れる釣銭の目標額（過不足計算の基準）
+  const [tillBaselineDraft, setTillBaselineDraft] = useState("");
 
   // ---- Excel自動保存 ----
   const [excelSupported, setExcelSupported] = useState(false);
@@ -1076,6 +1078,7 @@ function PosRegister() {
     if (parsed.expenses) setExpenses(parsed.expenses);
     if (parsed.checklistItems) setChecklistItems(parsed.checklistItems);
     if (parsed.checklistLogs) setChecklistLogs(parsed.checklistLogs);
+    if (parsed.tillBaseline != null) setTillBaseline(parsed.tillBaseline);
   }, []);
 
   useEffect(() => {
@@ -1086,6 +1089,7 @@ function PosRegister() {
           const parsed = JSON.parse(res.value);
           applyCloudPayload(parsed);
           if (parsed.storeArea) setStoreAreaDraft(parsed.storeArea);
+          if (parsed.tillBaseline != null) setTillBaselineDraft(String(parsed.tillBaseline));
         } else {
           await window.storage.set(
             STORAGE_KEY,
@@ -1104,6 +1108,7 @@ function PosRegister() {
               expenses: [],
               checklistItems: DEFAULT_CHECKLIST_ITEMS,
               checklistLogs: [],
+              tillBaseline: null,
             }),
             true
           );
@@ -1151,6 +1156,7 @@ function PosRegister() {
         expenses,
         checklistItems,
         checklistLogs,
+        tillBaseline,
         ...patch,
       };
       try {
@@ -1191,6 +1197,7 @@ function PosRegister() {
       expenses,
       checklistItems,
       checklistLogs,
+      tillBaseline,
       excelEnabled,
     ]
   );
@@ -1328,6 +1335,17 @@ function PosRegister() {
     setStoreArea(next);
     await persistAll({ storeArea: next });
     showFlash("店舗エリアを保存しました");
+  };
+
+  const saveTillBaseline = async () => {
+    const n = parseInt(tillBaselineDraft, 10);
+    if (isNaN(n) || n < 0) {
+      showFlash("基準額は0以上の数字で入力してください");
+      return;
+    }
+    setTillBaseline(n);
+    await persistAll({ tillBaseline: n });
+    showFlash("基準額を保存しました");
   };
 
   const addLineToCart = async (item, option, variant) => {
@@ -1562,6 +1580,21 @@ function PosRegister() {
     }
     if (todayExpenseTotal > 0) {
       lines.push(`本日の経費: ${yen(todayExpenseTotal)}`);
+    }
+    const closeAmountItem = (checklistItems.close || []).find((it) => it.withAmount);
+    if (closeAmountItem) {
+      const entry = checklistLogs.find((l) => l.date === todayYmd() && l.type === "close" && l.item === closeAmountItem.text);
+      if (entry && entry.amount != null) {
+        if (tillBaseline != null) {
+          const expected = tillBaseline + total;
+          const diff = entry.amount - expected;
+          lines.push(
+            `レジ金過不足: ${diff === 0 ? "¥0（一致）" : `${diff > 0 ? "+" : ""}${yen(diff)}（${diff > 0 ? "過剰" : "不足"}）`}（実測${yen(entry.amount)}）`
+          );
+        } else {
+          lines.push(`レジ金（実測）: ${yen(entry.amount)}（基準額未設定のため過不足は未計算）`);
+        }
+      }
     }
     lines.push("");
     lines.push("本日もお疲れ様でした🌙");
@@ -3100,6 +3133,26 @@ function PosRegister() {
               </button>
             </div>
 
+            <div className="bg-slate-800/60 rounded-lg border border-dashed border-teal-700 p-2.5 space-y-1.5">
+              <div className="text-teal-300 text-[11px] font-bold tracking-widest">基準額（開店時にレジへ入れる釣銭の目標額）</div>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  value={tillBaselineDraft}
+                  onChange={(e) => setTillBaselineDraft(e.target.value)}
+                  placeholder="例: 10000"
+                  className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-sm"
+                />
+                <button onClick={saveTillBaseline} className="bg-teal-700 text-white rounded-lg px-3 text-sm font-bold shrink-0">
+                  保存
+                </button>
+              </div>
+              {tillBaseline != null && (
+                <div className="text-[11px] text-slate-500">現在の基準額: ¥{tillBaseline.toLocaleString("ja-JP")}</div>
+              )}
+            </div>
+
             <input
               value={checklistStaffDraft}
               onChange={(e) => setChecklistStaffDraft(e.target.value)}
@@ -3169,6 +3222,32 @@ function PosRegister() {
                           <span className="text-[11px] text-slate-400">合計</span>
                           <span className="text-amber-300 font-bold text-sm">¥{amount.toLocaleString("ja-JP")}</span>
                         </div>
+                        {tillBaseline == null ? (
+                          <div className="text-[11px] text-slate-500 mt-1.5">
+                            上の「基準額」を登録すると、過不足を自動計算します
+                          </div>
+                        ) : (
+                          (() => {
+                            const expected = checklistType === "open" ? tillBaseline : tillBaseline + todayTotal;
+                            const diff = amount - expected;
+                            return (
+                              <div className="mt-1.5 pt-1.5 border-t border-slate-700 space-y-0.5">
+                                <div className="flex items-center justify-between text-[11px] text-slate-400">
+                                  <span>{checklistType === "open" ? "基準額" : "基準額＋本日売上"}</span>
+                                  <span>¥{expected.toLocaleString("ja-JP")}</span>
+                                </div>
+                                <div className="flex items-center justify-between text-sm font-bold">
+                                  <span className={diff === 0 ? "text-emerald-400" : "text-rose-400"}>
+                                    過不足{diff === 0 ? "" : diff > 0 ? "（過剰）" : "（不足）"}
+                                  </span>
+                                  <span className={diff === 0 ? "text-emerald-400" : "text-rose-400"}>
+                                    {diff === 0 ? "¥0（一致）" : `${diff > 0 ? "+" : ""}¥${diff.toLocaleString("ja-JP")}`}
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })()
+                        )}
                       </div>
                     )}
                     {photo && (
