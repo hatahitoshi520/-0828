@@ -2110,43 +2110,9 @@ function PosRegister() {
   };
 
   /* ============================================================
-     ★ 領収書まとめ撮影 → 自動入力 ロジック
+     ★ 領収書自動読み取り ロジック
      ============================================================ */
-  const handleReceiptFilesSelected = async (e) => {
-    const files = Array.from(e.target.files || []);
-    e.target.value = "";
-    if (!files.length) return;
-    const ids = files.map(() => genId("rq"));
-    const initial = files.map((f, i) => ({
-      id: ids[i],
-      photo: null,
-      date: "",
-      cat: "",
-      name: "",
-      amount: "",
-      receiptNo: "",
-      status: "queued",
-      error: "",
-    }));
-    setReceiptQueue((q) => [...q, ...initial]);
-
-    for (let i = 0; i < files.length; i++) {
-      const id = ids[i];
-      try {
-        const dataUrl = await resizeImageFileToDataUrl(files[i]);
-        setReceiptQueue((q) => q.map((x) => (x.id === id ? { ...x, photo: dataUrl, status: "analyzing" } : x)));
-        const parsed = await analyzeReceiptImage(dataUrl);
-        setReceiptQueue((q) => q.map((x) => (x.id === id ? { ...x, ...parsed, status: "done" } : x)));
-      } catch (err) {
-        console.error("receipt analyze failed", err);
-        setReceiptQueue((q) =>
-          q.map((x) => (x.id === id ? { ...x, status: "error", error: "自動読み取りに失敗しました。手入力してください。" } : x))
-        );
-      }
-    }
-  };
-
-  // カメラのライブ映像から自動撮影した1枚を、まとめ撮影と同じキュー・解析処理に乗せる
+  // カメラのライブ映像から自動撮影した1枚を、キュー登録・AI解析処理に乗せる
   const handleReceiptCaptured = async (dataUrl) => {
     const id = genId("rq");
     setReceiptQueue((q) => [
@@ -2900,21 +2866,17 @@ function PosRegister() {
           <div className="p-3 space-y-4">
             <div className="bg-slate-800/60 rounded-lg p-3 border border-dashed border-teal-700 space-y-2">
               <div className="text-teal-300 text-xs font-bold tracking-widest flex items-center gap-1">
-                <Upload size={13} /> 領収書から自動入力（まとめて撮影OK）
+                <Camera size={13} /> 領収書から自動入力
               </div>
               <div className="text-[11px] text-slate-400 leading-relaxed">
-                複数枚まとめて選択できます。AIが内容を読み取りますが、金額・日付・カテゴリは必ず確認してから登録してください（読み取りに失敗した場合は手入力用のフォームに切り替わります）。
+                カメラを起動し、レシートを枠に合わせて静止させると自動で撮影・読み取りします。金額・日付・カテゴリは必ず確認してから登録してください（読み取りに失敗した場合は手入力用のフォームに切り替わります）。1枚読み取ったら続けてボタンを押せば、次の1枚を読み取れます。
               </div>
               <button
                 onClick={() => setLiveScannerOpen(true)}
                 className="w-full bg-amber-600 text-slate-900 rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-1.5"
               >
-                <Camera size={14} /> カメラでスキャン（自動で1枚撮影）
+                <Camera size={14} /> カメラでスキャン（自動で読み取り）
               </button>
-              <label className="w-full bg-teal-700 text-white rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-1.5 cursor-pointer">
-                <Upload size={14} /> 領収書を撮影・まとめて選択する
-                <input type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={handleReceiptFilesSelected} />
-              </label>
               {receiptQueue.length > 0 && (
                 <>
                   <div className="space-y-2 pt-1">
