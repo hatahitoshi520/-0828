@@ -40,6 +40,12 @@ def upload(supabase_url, service_key, bucket, local_path, dest_name):
             },
             data=f,
         )
+    if resp.status_code >= 400:
+        # Surface the response body - Supabase Storage puts the actual
+        # reason here (e.g. "Invalid Compact JWS" for a bad/expired key,
+        # or a row-level-security violation if the key isn't service_role)
+        # and requests.raise_for_status() alone throws it away.
+        print(f"Supabase Storage returned {resp.status_code}: {resp.text}", file=sys.stderr)
     resp.raise_for_status()
     return f"{supabase_url.rstrip('/')}/storage/v1/object/public/{bucket}/{dest_name}"
 
