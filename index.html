@@ -14,8 +14,6 @@
   onerror="this.onerror=null;var s=document.createElement('script');s.src='https://unpkg.com/@babel/standalone@7/babel.min.js';document.head.appendChild(s);"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"
   onerror="this.onerror=null;var s=document.createElement('script');s.src='https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js';document.head.appendChild(s);"></script>
-<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"
-  onerror="this.onerror=null;var s=document.createElement('script');s.src='https://unpkg.com/sortablejs@1.15.2/Sortable.min.js';document.head.appendChild(s);"></script>
 
 <style>
   html, body { margin: 0; padding: 0; background: #0f172a; }
@@ -263,15 +261,11 @@ const Upload = (p) => (
 const AlertCircle = (p) => (
   <Icon {...p}><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></Icon>
 );
-const GripVertical = (p) => (
-  <Icon {...p}>
-    <circle cx="9" cy="6" r="1.2" fill="currentColor" stroke="none" />
-    <circle cx="9" cy="12" r="1.2" fill="currentColor" stroke="none" />
-    <circle cx="9" cy="18" r="1.2" fill="currentColor" stroke="none" />
-    <circle cx="15" cy="6" r="1.2" fill="currentColor" stroke="none" />
-    <circle cx="15" cy="12" r="1.2" fill="currentColor" stroke="none" />
-    <circle cx="15" cy="18" r="1.2" fill="currentColor" stroke="none" />
-  </Icon>
+const ChevronUp = (p) => (
+  <Icon {...p}><polyline points="18 15 12 9 6 15" /></Icon>
+);
+const ChevronDown = (p) => (
+  <Icon {...p}><polyline points="6 9 12 15 18 9" /></Icon>
 );
 const Camera = (p) => (
   <Icon {...p}>
@@ -1067,7 +1061,6 @@ function PosRegister() {
   const [tillBaseline, setTillBaseline] = useState(null); // 開店時にレジへ入れる釣銭の目標額（過不足計算の基準）
   const [tillBaselineDraft, setTillBaselineDraft] = useState("");
   const [handoverNoteDraft, setHandoverNoteDraft] = useState("");
-  const checklistListRef = useRef(null);
 
   // ---- 領収書ライブスキャン ----
   const [liveScannerOpen, setLiveScannerOpen] = useState(false);
@@ -1801,32 +1794,18 @@ function PosRegister() {
     await persistAll({ checklistItems: nextItems });
   };
 
-  // チェックリストの項目を長押しでドラッグして並び替えられるようにする
-  // （スマホでは長押し(delay)しないとドラッグが始まらないようにして、
-  // 通常のタップ・スクロール操作と衝突しないようにしている）
-  useEffect(() => {
-    if (tab !== "check" || !checklistListRef.current || typeof Sortable === "undefined") return;
-    const sortable = Sortable.create(checklistListRef.current, {
-      handle: ".chk-drag-handle",
-      animation: 150,
-      delay: 150,
-      delayOnTouchOnly: true,
-      touchStartThreshold: 5,
-      onEnd: (evt) => {
-        if (evt.oldIndex === evt.newIndex) return;
-        setChecklistItems((prev) => {
-          const list = [...(prev[checklistType] || [])];
-          const [moved] = list.splice(evt.oldIndex, 1);
-          list.splice(evt.newIndex, 0, moved);
-          const nextItems = { ...prev, [checklistType]: list };
-          persistAll({ checklistItems: nextItems });
-          return nextItems;
-        });
-      },
-    });
-    return () => sortable.destroy();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, checklistType, (checklistItems[checklistType] || []).map((i) => i.text).join("|")]);
+  // チェックリストの項目を▲▼ボタンで並び替える（機種やブラウザに左右されず確実に動く方式）
+  const moveChecklistItem = async (item, direction) => {
+    const list = [...(checklistItems[checklistType] || [])];
+    const idx = list.findIndex((i) => i.text === item);
+    if (idx === -1) return;
+    const targetIdx = direction === "up" ? idx - 1 : idx + 1;
+    if (targetIdx < 0 || targetIdx >= list.length) return;
+    [list[idx], list[targetIdx]] = [list[targetIdx], list[idx]];
+    const nextItems = { ...checklistItems, [checklistType]: list };
+    setChecklistItems(nextItems);
+    await persistAll({ checklistItems: nextItems });
+  };
 
   const grouped = useMemo(
     () =>
@@ -3263,8 +3242,8 @@ function PosRegister() {
               className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-sm"
             />
 
-            <div className="space-y-2" ref={checklistListRef}>
-              {(checklistItems[checklistType] || []).map((it) => {
+            <div className="space-y-2">
+              {(checklistItems[checklistType] || []).map((it, idx, arr) => {
                 const item = it.text;
                 const todayEntry = checklistLogs.find((l) => l.date === todayYmd() && l.type === checklistType && l.item === item);
                 const done = todayEntry ? todayEntry.done : false;
@@ -3274,8 +3253,23 @@ function PosRegister() {
                 return (
                   <div key={item} className="bg-slate-800 rounded-lg border border-slate-700 p-2.5">
                     <div className="flex items-center gap-2">
-                      <div className="chk-drag-handle shrink-0 text-slate-500 cursor-grab active:cursor-grabbing p-1 -ml-1" title="長押しで並び替え">
-                        <GripVertical size={16} />
+                      <div className="shrink-0 flex flex-col -ml-1">
+                        <button
+                          onClick={() => moveChecklistItem(item, "up")}
+                          disabled={idx === 0}
+                          className="text-slate-400 disabled:opacity-20 disabled:cursor-default p-0.5"
+                          title="上に移動"
+                        >
+                          <ChevronUp size={14} />
+                        </button>
+                        <button
+                          onClick={() => moveChecklistItem(item, "down")}
+                          disabled={idx === arr.length - 1}
+                          className="text-slate-400 disabled:opacity-20 disabled:cursor-default p-0.5"
+                          title="下に移動"
+                        >
+                          <ChevronDown size={14} />
+                        </button>
                       </div>
                       <button
                         onClick={() => toggleChecklistDone(item, done)}
