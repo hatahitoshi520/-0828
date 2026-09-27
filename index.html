@@ -565,17 +565,18 @@ function resizeImageFileToDataUrl(file, maxW = 900) {
    呼び出し側で必ず人の目でも確認できるようにする（自動登録はしない）。 */
 async function analyzeReceiptImage(dataUrl) {
   const base64 = dataUrl.split(",")[1];
-  const prompt = `これは経費精算用の領収書・レシート画像です。画像を読み取り、以下の項目を厳密なJSON形式のみで出力してください（説明文・前置き・コードブロック記号は一切不要、JSONオブジェクトのみを出力）。
+  const prompt = `これは経費精算のための画像です。手や机、床、商品棚、人物など、領収書・レシート以外が写っている場合もあります。画像をよく確認し、以下の項目を厳密なJSON形式のみで出力してください（説明文・前置き・コードブロック記号は一切不要、JSONオブジェクトのみを出力）。
 
 {
+  "is_receipt": 印字された領収書・レシート・請求書が画像内にはっきりと写っており、店名か金額のどちらかが読み取れる場合のみtrue。手・机・背景・ぼやけて文字が読めない等、レシートの内容が実際には読み取れない場合は必ずfalse（true/falseの真偽値。憶測でtrueにしないこと）,
   "date": "YYYY-MM-DD形式の発行日。レシート上部・下部の日時印字を隅々まで確認すること。西暦・和暦どちらでも読み取り西暦に変換すること。年が読み取れない場合は今日が${new Date().getFullYear()}年であることを踏まえて推定してよいが、月日が読み取れない場合は憶測で埋めず空文字にすること",
-  "cat": "次の選択肢から最も適切な1つを厳密にそのまま出力：${EXPENSE_CATEGORIES.join("、")}",
+  "cat": "次の選択肢から最も適切な1つを厳密にそのまま出力。判断の目安（喫茶店の経費）：仕入高＝食材・飲料・包装資材など商品として提供するものの仕入れ／水道光熱費＝電気・ガス・水道／消耗品費＝清掃用品・紙コップ等の消耗品・文房具・レジ用紙・少額備品／通信費＝携帯電話・インターネット・郵送費／広告宣伝費＝チラシ・SNS広告・看板／旅費交通費＝ガソリン代・駐車場代・電車バス代・出張費／賃借料＝家賃・リース料／修繕費＝設備や内装の修理・メンテナンス／接待交際費＝取引先との飲食・贈答品／雑費＝上記のどれにも明確に当てはまらない場合のみ。店名・購入内容から最も具体的に当てはまるものを選び、安易に雑費にしないこと：${EXPENSE_CATEGORIES.join("、")}",
   "name": "店名と購入内容を簡潔に（例：業務スーパー　食材仕入れ）",
   "amount": 合計金額（税込）の数値のみ。カンマや円記号は付けない。読み取れない場合は0,
   "receiptNo": "レシート番号・領収書番号・取引番号などの記載があれば転記、無ければ空文字"
 }
 
-数値は必ず算用数字のみとし、憶測で埋めず読み取れない項目は指示通り空にしてください。`;
+is_receiptがfalseの場合は、他の項目もすべて空文字・0にしてください。数値は必ず算用数字のみとし、憶測で埋めず読み取れない項目は指示通り空にしてください。`;
   const data = await callAnthropicMessages({
     model: "claude-sonnet-5",
     max_tokens: 500,
@@ -593,6 +594,7 @@ async function analyzeReceiptImage(dataUrl) {
   const cleaned = text.replace(/```json|```/g, "").trim();
   const parsed = JSON.parse(cleaned);
   return {
+    isReceipt: parsed.is_receipt === true,
     date: parsed.date || "",
     cat: EXPENSE_CATEGORIES.includes(parsed.cat) ? parsed.cat : "",
     name: parsed.name || "",
@@ -2120,7 +2122,10 @@ function PosRegister() {
   const handleReceiptCaptured = async (dataUrl) => {
     try {
       const parsed = await analyzeReceiptImage(dataUrl);
-      const recognized = (parsed.amount && Number(parsed.amount) > 0) || (parsed.name && parsed.name.trim());
+      // AIが「これは領収書だ」と明示的に判定し、かつ金額か店名のどちらかを
+      // 実際に読み取れた場合だけ本物のレシートとして扱う（手や机などを
+      // 誤って登録しないよう、is_receiptの判定を必須条件にする）
+      const recognized = parsed.isReceipt && ((parsed.amount && Number(parsed.amount) > 0) || (parsed.name && parsed.name.trim()));
       if (!recognized) return false;
       // 日付は領収書から実際に読み取った値のみを使う（今日の日付で
       // 仮入力すると、間違った日付に気づかず登録してしまう恐れがあるため）。
