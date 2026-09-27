@@ -11,13 +11,17 @@ Usage:
     pip install requests
     python3 upload_to_supabase.py \
         --supabase-url https://<project-ref>.supabase.co \
-        --service-key "<service_role key>" \
+        --service-key "<key - see below>" \
         --file "C:\\...\\draft_30s.mp4" \
         --bucket reels
 
-The service_role key is a secret (bypasses Row Level Security) - get it
-from the Supabase dashboard (Project Settings -> API -> service_role) and
-never commit it. It's only meant to be used from your own machine/scripts.
+Despite the flag name, this doesn't require the (secret) service_role key
+- a Row Level Security policy on storage.objects grants insert/update on
+just the target bucket to the anon role, so the project's public legacy
+anon key (a JWT starting eyJhbGci..., from Supabase dashboard -> Project
+Settings -> API -> Legacy API Keys) works and is not a secret. See
+tools/pipeline/README.md for why (this project's storage endpoint rejects
+the newer sb_secret_... key format with "Invalid Compact JWS").
 """
 import argparse
 import sys
