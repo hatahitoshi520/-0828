@@ -2168,22 +2168,36 @@ function PosRegister() {
       showFlash("読み取り完了している項目がありません");
       return;
     }
-    let successCount = 0;
-    let failCount = 0;
+    // 1件ずつ登録（＝1件ずつクラウドへ保存）していると、件数が多いほど
+    // 通信回数が増えて時間がかかり、失敗もしやすくなる。まとめて1回だけ
+    // 保存することで、何十件でも短時間かつ確実に一括登録できるようにする。
+    const validExps = [];
     const successIds = [];
+    let failCount = 0;
     for (const item of doneItems) {
-      const ok = await addExpense(
-        { date: item.date, cat: item.cat, name: item.name, amount: item.amount, receiptNo: item.receiptNo },
-        true
-      );
-      if (ok) {
-        successCount++;
-        successIds.push(item.id);
-      } else {
+      const amount = parseInt(item.amount, 10);
+      if (!item.date || !item.cat || !(item.name || "").trim() || !amount || amount <= 0) {
         failCount++;
+        continue;
       }
+      validExps.push({
+        id: genId("e"),
+        date: item.date,
+        cat: item.cat,
+        name: item.name.trim(),
+        amount,
+        receiptNo: (item.receiptNo || "").trim(),
+      });
+      successIds.push(item.id);
+    }
+    if (validExps.length > 0) {
+      const next = [...expensesRef.current, ...validExps];
+      expensesRef.current = next;
+      setExpenses(next);
+      await persistAll({ expenses: next });
     }
     setReceiptQueue((q) => q.filter((x) => !successIds.includes(x.id)));
+    const successCount = validExps.length;
     if (failCount === 0) {
       showFlash(`${successCount}件を一括登録しました`);
     } else if (successCount === 0) {
