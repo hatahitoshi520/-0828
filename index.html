@@ -647,6 +647,11 @@ function todayYmd() {
   const n = new Date();
   return ymd(n.getFullYear(), n.getMonth(), n.getDate());
 }
+// <input type="date"> はゼロ埋めの厳密なYYYY-MM-DD形式が必須なので専用に用意
+function todayIsoDate() {
+  const n = new Date();
+  return n.getFullYear() + "-" + String(n.getMonth() + 1).padStart(2, "0") + "-" + String(n.getDate()).padStart(2, "0");
+}
 function calcShiftHours(start, end) {
   if (!start || !end) return 0;
   const [sh, sm] = start.split(":").map(Number);
@@ -2078,29 +2083,29 @@ function PosRegister() {
   /* ============================================================
      ★ 経費・確定申告 ロジック
      ============================================================ */
-  const addExpense = async (draft) => {
+  const addExpense = async (draft, silent) => {
     const amount = parseInt(draft.amount, 10);
     if (!draft.date) {
-      showFlash("支出日を入力してください");
+      if (!silent) showFlash("支出日を入力してください");
       return false;
     }
     if (!draft.cat) {
-      showFlash("カテゴリを選択してください");
+      if (!silent) showFlash("カテゴリを選択してください");
       return false;
     }
-    if (!draft.name.trim()) {
-      showFlash("内容を入力してください");
+    if (!(draft.name || "").trim()) {
+      if (!silent) showFlash("内容を入力してください");
       return false;
     }
     if (!amount || amount <= 0) {
-      showFlash("金額を正しく入力してください");
+      if (!silent) showFlash("金額を正しく入力してください");
       return false;
     }
-    const exp = { id: genId("e"), date: draft.date, cat: draft.cat, name: draft.name.trim(), amount, receiptNo: draft.receiptNo.trim() };
+    const exp = { id: genId("e"), date: draft.date, cat: draft.cat, name: draft.name.trim(), amount, receiptNo: (draft.receiptNo || "").trim() };
     const next = [...expenses, exp];
     setExpenses(next);
     await persistAll({ expenses: next });
-    showFlash(`経費を登録しました（${yen(amount)}）`);
+    if (!silent) showFlash(`経費を登録しました（${yen(amount)}）`);
     return true;
   };
   const deleteExpense = async (id) => {
@@ -2121,11 +2126,23 @@ function PosRegister() {
     ]);
     try {
       const parsed = await analyzeReceiptImage(dataUrl);
-      setReceiptQueue((q) => q.map((x) => (x.id === id ? { ...x, ...parsed, status: "done" } : x)));
+      // AIが日付・カテゴリを読み取れなかった場合、未入力のままだと登録ボタンが
+      // 反応しないように見えてしまうため、安全な初期値を入れておく（金額は
+      // 誤登録を防ぐため自動では埋めない）
+      const filled = {
+        ...parsed,
+        date: parsed.date || todayIsoDate(),
+        cat: parsed.cat || "雑費",
+      };
+      setReceiptQueue((q) => q.map((x) => (x.id === id ? { ...x, ...filled, status: "done" } : x)));
     } catch (err) {
       console.error("receipt analyze failed", err);
       setReceiptQueue((q) =>
-        q.map((x) => (x.id === id ? { ...x, status: "error", error: "自動読み取りに失敗しました。手入力してください。" } : x))
+        q.map((x) =>
+          x.id === id
+            ? { ...x, date: todayIsoDate(), cat: "雑費", status: "error", error: "自動読み取りに失敗しました。内容を確認して手入力してください。" }
+            : x
+        )
       );
     }
   };
@@ -2146,16 +2163,28 @@ function PosRegister() {
       return;
     }
     let successCount = 0;
+    let failCount = 0;
     const successIds = [];
     for (const item of doneItems) {
-      const ok = await addExpense({ date: item.date, cat: item.cat, name: item.name, amount: item.amount, receiptNo: item.receiptNo });
+      const ok = await addExpense(
+        { date: item.date, cat: item.cat, name: item.name, amount: item.amount, receiptNo: item.receiptNo },
+        true
+      );
       if (ok) {
         successCount++;
         successIds.push(item.id);
+      } else {
+        failCount++;
       }
     }
     setReceiptQueue((q) => q.filter((x) => !successIds.includes(x.id)));
-    if (successCount > 0) showFlash(`${successCount}件を一括登録しました`);
+    if (failCount === 0) {
+      showFlash(`${successCount}件を一括登録しました`);
+    } else if (successCount === 0) {
+      showFlash("金額または内容が未入力の項目があり、登録できませんでした。各項目を確認してください");
+    } else {
+      showFlash(`${successCount}件を登録しました（${failCount}件は金額または内容が未入力のため未登録・残っています）`);
+    }
   };
 
   const expenseYears = useMemo(() => [...new Set(expenses.map((e) => e.date.slice(0, 4)))].sort().reverse(), [expenses]);
@@ -4280,7 +4309,10 @@ function ReceiptQueueItem({ item, onCommit, onRemove }) {
             <input
               type="number"
               placeholder="金額"
-              className="flex-1 bg-slate-900 rounded px-2 py-1.5 text-sm border border-slate-700"
+              className={
+                "flex-1 bg-slate-900 rounded px-2 py-1.5 text-sm border " +
+                (!amount || Number(amount) <= 0 ? "border-rose-500" : "border-slate-700")
+              }
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
             />
@@ -4291,6 +4323,9 @@ function ReceiptQueueItem({ item, onCommit, onRemove }) {
               onChange={(e) => setReceiptNo(e.target.value)}
             />
           </div>
+          {(!amount || Number(amount) <= 0) && (
+            <div className="text-[11px] text-rose-300">AIが金額を読み取れませんでした。金額を入力してから登録してください</div>
+          )}
           <button
             onClick={() => onCommit(item.id, { date, cat, name, amount, receiptNo })}
             className="w-full bg-emerald-700 text-white rounded-lg py-2 text-sm font-bold"
