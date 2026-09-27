@@ -3881,38 +3881,48 @@ function ReceiptLiveScanner({ onCapture, onClose }) {
     }, COOLDOWN_MS);
   }, [onCapture]);
 
-  // 映像が静止しているかを、縮小した画像の明るさの変化量で簡易判定する
-  // （かざしてすぐ読み取れるよう、しきい値・必要回数はゆるめに設定）
+  // 枠の中央付近に「白っぽい紙（レシート）」が写っているかを明るさで簡易判定し、
+  // それが確認できた場合だけ静止判定に進んで自動撮影する。
+  // （内容を見ずに一定時間で強制撮影する＝連射のような撮り方はしない）
   useEffect(() => {
     if (status !== "live") return;
+    const size = 48;
+    const margin = 8; // 枠のおおよそ中央〜7割ほどの範囲だけを見る
     const checkCanvas = document.createElement("canvas");
-    checkCanvas.width = 48;
-    checkCanvas.height = 48;
+    checkCanvas.width = size;
+    checkCanvas.height = size;
     const ctx = checkCanvas.getContext("2d");
     const interval = setInterval(() => {
       const video = videoRef.current;
       if (!video || !video.videoWidth || pausedRef.current) return;
-      ctx.drawImage(video, 0, 0, 48, 48);
-      const frame = ctx.getImageData(0, 0, 48, 48).data;
-      if (prevFrameRef.current) {
+      ctx.drawImage(video, 0, 0, size, size);
+      const frame = ctx.getImageData(0, 0, size, size).data;
+
+      let brightCount = 0;
+      let sampled = 0;
+      for (let y = margin; y < size - margin; y++) {
+        for (let x = margin; x < size - margin; x++) {
+          const i = (y * size + x) * 4;
+          const lum = (frame[i] + frame[i + 1] + frame[i + 2]) / 3;
+          if (lum > 150) brightCount++;
+          sampled++;
+        }
+      }
+      const receiptLikely = sampled > 0 && brightCount / sampled > 0.45;
+
+      if (receiptLikely && prevFrameRef.current) {
         let diff = 0;
         for (let i = 0; i < frame.length; i += 4) diff += Math.abs(frame[i] - prevFrameRef.current[i]);
         const avgDiff = diff / (frame.length / 4);
         stableCountRef.current = avgDiff < 12 ? stableCountRef.current + 1 : 0;
         if (stableCountRef.current >= 2) doCapture();
+      } else {
+        stableCountRef.current = 0;
       }
       prevFrameRef.current = frame;
     }, 300);
     return () => clearInterval(interval);
   }, [status, doCapture]);
-
-  // 静止判定がうまく働かない場合でも「かざすだけ」で読み取れるよう、
-  // 一定時間が経ったら静止判定を待たずに強制的に撮影する保険のタイマー
-  useEffect(() => {
-    if (status !== "live" || paused) return;
-    const forceTimer = setTimeout(doCapture, 2200);
-    return () => clearTimeout(forceTimer);
-  }, [status, paused, doCapture]);
 
   return (
     <div className="fixed inset-0 bg-black z-30 flex flex-col">
@@ -3943,7 +3953,7 @@ function ReceiptLiveScanner({ onCapture, onClose }) {
         <div className="text-xs text-slate-300">
           {status === "starting" && "カメラを起動しています…"}
           {status === "live" && paused && "読み取りました。次のレシートに入れ替えてください"}
-          {status === "live" && !paused && "レシートを枠の中にかざしてください。自動で撮影します"}
+          {status === "live" && !paused && "レシートを枠の中にかざしてください。写っているのを確認してから自動で撮影します"}
           {status === "error" && "「スキャンを終える」で閉じて、もう一度お試しください"}
         </div>
         {status === "live" && (
