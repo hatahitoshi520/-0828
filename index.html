@@ -3882,6 +3882,7 @@ function ReceiptLiveScanner({ onCapture, onClose }) {
   }, [onCapture]);
 
   // 映像が静止しているかを、縮小した画像の明るさの変化量で簡易判定する
+  // （かざしてすぐ読み取れるよう、しきい値・必要回数はゆるめに設定）
   useEffect(() => {
     if (status !== "live") return;
     const checkCanvas = document.createElement("canvas");
@@ -3897,13 +3898,21 @@ function ReceiptLiveScanner({ onCapture, onClose }) {
         let diff = 0;
         for (let i = 0; i < frame.length; i += 4) diff += Math.abs(frame[i] - prevFrameRef.current[i]);
         const avgDiff = diff / (frame.length / 4);
-        stableCountRef.current = avgDiff < 6 ? stableCountRef.current + 1 : 0;
-        if (stableCountRef.current >= 3) doCapture();
+        stableCountRef.current = avgDiff < 12 ? stableCountRef.current + 1 : 0;
+        if (stableCountRef.current >= 2) doCapture();
       }
       prevFrameRef.current = frame;
-    }, 350);
+    }, 300);
     return () => clearInterval(interval);
   }, [status, doCapture]);
+
+  // 静止判定がうまく働かない場合でも「かざすだけ」で読み取れるよう、
+  // 一定時間が経ったら静止判定を待たずに強制的に撮影する保険のタイマー
+  useEffect(() => {
+    if (status !== "live" || paused) return;
+    const forceTimer = setTimeout(doCapture, 2200);
+    return () => clearTimeout(forceTimer);
+  }, [status, paused, doCapture]);
 
   return (
     <div className="fixed inset-0 bg-black z-30 flex flex-col">
@@ -3934,7 +3943,7 @@ function ReceiptLiveScanner({ onCapture, onClose }) {
         <div className="text-xs text-slate-300">
           {status === "starting" && "カメラを起動しています…"}
           {status === "live" && paused && "読み取りました。次のレシートに入れ替えてください"}
-          {status === "live" && !paused && "レシートを枠に合わせて、動かさずに持ってください。自動で撮影します"}
+          {status === "live" && !paused && "レシートを枠の中にかざしてください。自動で撮影します"}
           {status === "error" && "「スキャンを終える」で閉じて、もう一度お試しください"}
         </div>
         {status === "live" && (
