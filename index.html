@@ -1078,6 +1078,13 @@ function PosRegister() {
   useEffect(() => {
     tablesRef.current = tables;
   }, [tables]);
+  // 領収書を連続でスキャン→まとめて登録すると、setExpensesが古いexpensesを
+  // 参照したまま複数回呼ばれ、後の呼び出しが前の呼び出しを上書きしてしまう
+  // （tablesRefと同じ問題）ため、常に最新の値を同期して参照できるようにする
+  const expensesRef = useRef(expenses);
+  useEffect(() => {
+    expensesRef.current = expenses;
+  }, [expenses]);
   const cartBarRef = useRef(null);
   const [cartBarHeight, setCartBarHeight] = useState(0);
 
@@ -2099,14 +2106,18 @@ function PosRegister() {
       return false;
     }
     const exp = { id: genId("e"), date: draft.date, cat: draft.cat, name: draft.name.trim(), amount, receiptNo: (draft.receiptNo || "").trim() };
-    const next = [...expenses, exp];
+    // expensesRef.currentを使い、直前の登録がまだ再描画に反映されていなくても
+    // 常に最新の一覧に追加できるようにする（連続登録での上書き防止）
+    const next = [...expensesRef.current, exp];
+    expensesRef.current = next;
     setExpenses(next);
     await persistAll({ expenses: next });
     if (!silent) showFlash(`経費を登録しました（${yen(amount)}）`);
     return true;
   };
   const deleteExpense = async (id) => {
-    const next = expenses.filter((e) => e.id !== id);
+    const next = expensesRef.current.filter((e) => e.id !== id);
+    expensesRef.current = next;
     setExpenses(next);
     await persistAll({ expenses: next });
   };
@@ -2114,7 +2125,6 @@ function PosRegister() {
   /* ============================================================
      ★ 領収書自動読み取り ロジック
      ============================================================ */
-  // カメラのライブ映像から自動撮影した1枚を、キュー登録・AI解析処理に乗せる
   // ライブスキャンで撮影した1枚をAIに読み取らせ、実際に金額か店名を
   // 認識できた場合だけ「本物のレシートが写っていた」とみなしてキューに
   // 追加する。何も読み取れなかった場合はキューに入れず、スキャナー側に
