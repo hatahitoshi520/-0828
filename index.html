@@ -39,7 +39,7 @@
    URL（クエリ付き）へ自動的に移動して最新版を読み込み直す。
    ★修正のたびに、下のAPP_VERSIONの値を必ず変更すること。
    ============================================================ */
-const APP_VERSION = "2026-09-29-01";
+const APP_VERSION = "2026-09-29-02";
 async function suzuCheckForNewVersion() {
   try {
     const res = await fetch(location.pathname + "?_v=" + Date.now(), { cache: "no-store" });
@@ -614,7 +614,7 @@ async function analyzeReceiptImage(dataUrl) {
 is_receiptがfalseの場合は、他の項目もすべて空文字・0にしてください。数値は必ず算用数字のみとし、憶測で埋めず読み取れない項目は指示通り空にしてください。`;
   const data = await callAnthropicMessages({
     model: "claude-sonnet-5",
-    max_tokens: 500,
+    max_tokens: 1024,
     messages: [
       {
         role: "user",
@@ -625,9 +625,27 @@ is_receiptがfalseの場合は、他の項目もすべて空文字・0にして�
       },
     ],
   });
-  const text = (data.content && data.content[0] && data.content[0].text) || "";
-  const cleaned = text.replace(/```json|```/g, "").trim();
-  const parsed = JSON.parse(cleaned);
+  // ★修正: content[0]だけを見ていると、応答が複数ブロックに分かれた場合
+  // （例: 説明文＋JSON等）に空文字を拾ってJSON.parseが必ず失敗し、
+  // 「撮影はされるが毎回読み取り失敗になる」原因になっていた。
+  // 週次分析と同じく、全テキストブロックを結合してから使う。
+  const text = (data.content || [])
+    .map((b) => (b.type === "text" ? b.text : ""))
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+  const fenceStripped = text.replace(/```json|```/g, "").trim();
+  // 前置きが混ざっても拾えるよう、最初の{から最後の}までを抜き出す
+  const braceStart = fenceStripped.indexOf("{");
+  const braceEnd = fenceStripped.lastIndexOf("}");
+  const jsonSlice = braceStart !== -1 && braceEnd !== -1 ? fenceStripped.slice(braceStart, braceEnd + 1) : fenceStripped;
+  let parsed;
+  try {
+    parsed = JSON.parse(jsonSlice);
+  } catch (e) {
+    console.error("receipt AI response was not valid JSON:", text);
+    throw e;
+  }
   return {
     isReceipt: parsed.is_receipt === true,
     date: parsed.date || "",
@@ -2206,7 +2224,21 @@ function PosRegister() {
       return "fail";
     } catch (err) {
       console.error("receipt analyze failed", err);
-      if (forceQueue) {
+      // APIキー未設定・無効・利用上限などは、何回撮り直しても解決しない
+      // エラーなので、通常の3回リトライを待たず、理由が分かる形で
+      // 即座に手入力用キューへ回す（原因不明の「読み取れません」ループを防ぐ）
+      const msg = (err && err.message) || "";
+      let apiErrorReason = "";
+      if (err && err.code === "NO_API_KEY") {
+        apiErrorReason = "AI機能のAPIキーが未設定です。「品目」タブでAPIキーを登録してください。";
+      } else if (/API error 401/.test(msg)) {
+        apiErrorReason = "APIキーが無効です。「品目」タブでAPIキーを登録し直してください。";
+      } else if (/API error 429/.test(msg)) {
+        apiErrorReason = "AIの利用上限（レート制限）に達しています。少し時間をおいてから再度お試しください。";
+      } else if (/API error 5\d\d/.test(msg)) {
+        apiErrorReason = "AIサーバー側が一時的に混み合っています。少し時間をおいてから再度お試しください。";
+      }
+      if (apiErrorReason || forceQueue) {
         const id = genId("rq");
         setReceiptQueue((q) => [
           ...q,
@@ -2219,7 +2251,7 @@ function PosRegister() {
             amount: "",
             receiptNo: "",
             status: "error",
-            error: "自動読み取りに失敗しました。内容を確認して手入力してください。",
+            error: apiErrorReason || "自動読み取りに失敗しました。内容を確認して手入力してください。",
           },
         ]);
         return "manual";
