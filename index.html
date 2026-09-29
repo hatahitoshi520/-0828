@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>喫茶すず〜 ハンディレジ</title>
 <script src="https://cdn.tailwindcss.com"></script>
 
@@ -26,6 +29,38 @@
 <div id="boot-error"></div>
 
 <script>
+/* ============================================================
+   自動バージョンチェック（Safari等のキャッシュ対策）
+   ------------------------------------------------------------
+   iPhoneのSafari（特にホーム画面に追加している場合）はページを
+   強くキャッシュし、修正を配信しても古い挙動のまま動き続けることが
+   ある。このアプリ自身のHTMLを定期的にキャッシュ無視で取得し直し、
+   中のAPP_VERSIONが変わっていたら、キャッシュを回避できる新しい
+   URL（クエリ付き）へ自動的に移動して最新版を読み込み直す。
+   ★修正のたびに、下のAPP_VERSIONの値を必ず変更すること。
+   ============================================================ */
+const APP_VERSION = "2026-09-29-01";
+async function suzuCheckForNewVersion() {
+  try {
+    const res = await fetch(location.pathname + "?_v=" + Date.now(), { cache: "no-store" });
+    const html = await res.text();
+    const m = html.match(/const APP_VERSION = "([^"]+)"/);
+    if (m && m[1] && m[1] !== APP_VERSION) {
+      const url = new URL(location.href);
+      url.searchParams.set("_v", Date.now());
+      location.href = url.toString();
+    }
+  } catch (e) {
+    /* 通信エラーは無視し、次回チェックに任せる */
+  }
+}
+setInterval(suzuCheckForNewVersion, 30000);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") suzuCheckForNewVersion();
+});
+window.addEventListener("focus", suzuCheckForNewVersion);
+suzuCheckForNewVersion();
+
 /* ============================================================
    window.storage の Supabase 版ポリフィル
    ------------------------------------------------------------
