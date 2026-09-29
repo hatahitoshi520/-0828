@@ -39,7 +39,7 @@
    URL（クエリ付き）へ自動的に移動して最新版を読み込み直す。
    ★修正のたびに、下のAPP_VERSIONの値を必ず変更すること。
    ============================================================ */
-const APP_VERSION = "2026-09-29-05";
+const APP_VERSION = "2026-09-29-06";
 async function suzuCheckForNewVersion() {
   try {
     const res = await fetch(location.pathname + "?_v=" + Date.now(), { cache: "no-store" });
@@ -4054,30 +4054,9 @@ function ReceiptLiveScanner({ onCapture, onClose }) {
     canvas.height = Math.round(video.videoHeight * scale);
     const ctx = canvas.getContext("2d");
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    // サーマル紙（感熱紙）レシートは印字が薄く色あせていることが多く、
-    // 店内の照明が暗い場合もある。まず画像全体の明るさを一定の目安まで
-    // 自動で補正し（暗い場所での撮影でも文字が沈んで見えなくなるのを防ぐ）、
-    // そのうえでコントラストを上げて文字とレシート地の差をはっきりさせる
-    // （Uint8ClampedArrayなので0〜255の範囲に自動的にクランプされる）
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const px = imageData.data;
-    let lumSum = 0;
-    let lumCount = 0;
-    for (let i = 0; i < px.length; i += 4 * 7) {
-      lumSum += (px[i] + px[i + 1] + px[i + 2]) / 3;
-      lumCount++;
-    }
-    const avgLum = lumCount > 0 ? lumSum / lumCount : 180;
-    const targetLum = 180; // レシート紙（明るい紙面）を想定した目標の明るさ
-    const brightnessShift = Math.max(-60, Math.min(90, targetLum - avgLum));
-    const contrast = 1.5;
-    const intercept = brightnessShift * contrast + 128 * (1 - contrast);
-    for (let i = 0; i < px.length; i += 4) {
-      px[i] = px[i] * contrast + intercept;
-      px[i + 1] = px[i + 1] * contrast + intercept;
-      px[i + 2] = px[i + 2] * contrast + intercept;
-    }
-    ctx.putImageData(imageData, 0, 0);
+    // ★検証の結果、明るさ・コントラストを機械的に補正すると、もともと薄い
+    // 文字ほど背景の紙色との差が縮んでしまい、かえって読み取りにくくなる
+    // ことを確認したため撤去した。カメラの映像をそのままAIに渡す。
     const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
 
     setChecking(true);
