@@ -39,7 +39,7 @@
    URL（クエリ付き）へ自動的に移動して最新版を読み込み直す。
    ★修正のたびに、下のAPP_VERSIONの値を必ず変更すること。
    ============================================================ */
-const APP_VERSION = "2026-09-29-02";
+const APP_VERSION = "2026-09-29-03";
 async function suzuCheckForNewVersion() {
   try {
     const res = await fetch(location.pathname + "?_v=" + Date.now(), { cache: "no-store" });
@@ -4033,13 +4033,27 @@ function ReceiptLiveScanner({ onCapture, onClose }) {
     setPaused(true);
     setLastResult(null);
     // 日付など細かい文字をAIが読み取れるよう、解像度・画質を高めにして撮影する
-    const maxW = 1400;
+    const maxW = 1600;
     const scale = Math.min(1, maxW / video.videoWidth);
     const canvas = document.createElement("canvas");
     canvas.width = Math.round(video.videoWidth * scale);
     canvas.height = Math.round(video.videoHeight * scale);
-    canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    // サーマル紙（感熱紙）レシートは印字が薄く色あせていることが多いため、
+    // コントラストを上げて文字とレシート地の差をはっきりさせてからAIに渡す
+    // （Uint8ClampedArrayなので0〜255の範囲に自動的にクランプされる）
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const px = imageData.data;
+    const contrast = 1.5;
+    const intercept = 128 * (1 - contrast);
+    for (let i = 0; i < px.length; i += 4) {
+      px[i] = px[i] * contrast + intercept;
+      px[i + 1] = px[i + 1] * contrast + intercept;
+      px[i + 2] = px[i + 2] * contrast + intercept;
+    }
+    ctx.putImageData(imageData, 0, 0);
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
 
     setChecking(true);
     // 同じレシートに3回続けて自動読み取りが失敗した場合は、無限にリトライ
