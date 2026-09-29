@@ -2129,27 +2129,67 @@ function PosRegister() {
   // 認識できた場合だけ「本物のレシートが写っていた」とみなしてキューに
   // 追加する。何も読み取れなかった場合はキューに入れず、スキャナー側に
   // 失敗を伝えて自動で撮り直しを続けさせる（呼び出し元へ真偽を返す）。
-  const handleReceiptCaptured = async (dataUrl) => {
+  // 戻り値: "success"（AIが自動で読み取れた）/ "manual"（読み取れなかったが
+  // 手入力用にキューへ追加した）/ "fail"（キューに入れず、撮り直しを促す）。
+  // サーマル紙の色あせなどでAIが読み取れないレシートも実際には多いため、
+  // 同じレシートに何度も失敗し続ける場合（forceQueue=true）は諦めずに
+  // 写真付きでキューへ残し、スタッフが手入力で登録できるようにする。
+  const handleReceiptCaptured = async (dataUrl, forceQueue) => {
     try {
       const parsed = await analyzeReceiptImage(dataUrl);
-      // AIが「これは領収書だ」と明示的に判定し、かつ金額か店名のどちらかを
-      // 実際に読み取れた場合だけ本物のレシートとして扱う（手や机などを
-      // 誤って登録しないよう、is_receiptの判定を必須条件にする）
       const recognized = parsed.isReceipt && ((parsed.amount && Number(parsed.amount) > 0) || (parsed.name && parsed.name.trim()));
-      if (!recognized) return false;
-      // 日付は領収書から実際に読み取った値のみを使う（今日の日付で
-      // 仮入力すると、間違った日付に気づかず登録してしまう恐れがあるため）。
-      // カテゴリだけは登録ボタンが押せなくなるのを防ぐため「雑費」を仮入力する。
-      const id = genId("rq");
-      const filled = { ...parsed, cat: parsed.cat || "雑費" };
-      setReceiptQueue((q) => [
-        ...q,
-        { id, photo: dataUrl, date: "", cat: "", name: "", amount: "", receiptNo: "", status: "done", error: "", ...filled },
-      ]);
-      return true;
+      if (recognized) {
+        // 日付は領収書から実際に読み取った値のみを使う（今日の日付で
+        // 仮入力すると、間違った日付に気づかず登録してしまう恐れがあるため）。
+        // カテゴリだけは登録ボタンが押せなくなるのを防ぐため「雑費」を仮入力する。
+        const id = genId("rq");
+        const filled = { ...parsed, cat: parsed.cat || "雑費" };
+        setReceiptQueue((q) => [
+          ...q,
+          { id, photo: dataUrl, date: "", cat: "", name: "", amount: "", receiptNo: "", status: "done", error: "", ...filled },
+        ]);
+        return "success";
+      }
+      if (forceQueue) {
+        const id = genId("rq");
+        setReceiptQueue((q) => [
+          ...q,
+          {
+            id,
+            photo: dataUrl,
+            date: "",
+            cat: "雑費",
+            name: "",
+            amount: "",
+            receiptNo: "",
+            status: "error",
+            error: "自動読み取りができませんでした。内容を確認して手入力してください。",
+          },
+        ]);
+        return "manual";
+      }
+      return "fail";
     } catch (err) {
       console.error("receipt analyze failed", err);
-      return false;
+      if (forceQueue) {
+        const id = genId("rq");
+        setReceiptQueue((q) => [
+          ...q,
+          {
+            id,
+            photo: dataUrl,
+            date: "",
+            cat: "雑費",
+            name: "",
+            amount: "",
+            receiptNo: "",
+            status: "error",
+            error: "自動読み取りに失敗しました。内容を確認して手入力してください。",
+          },
+        ]);
+        return "manual";
+      }
+      return "fail";
     }
   };
 
@@ -3865,6 +3905,7 @@ function ReceiptLiveScanner({ onCapture, onClose }) {
   const stableCountRef = useRef(0);
   const pausedRef = useRef(false); // 撮影〜判定〜クールダウン中はtrue
   const captureCountRef = useRef(0); // インターバル内から同期的に上限を判定するため
+  const failStreakRef = useRef(0); // 連続で自動読み取りに失敗した回数
   const [status, setStatus] = useState("starting"); // starting | live | error
   const [errorMsg, setErrorMsg] = useState("");
   const [paused, setPaused] = useState(false);
@@ -3934,14 +3975,21 @@ function ReceiptLiveScanner({ onCapture, onClose }) {
     const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
 
     setChecking(true);
-    const recognized = await onCapture(dataUrl);
+    // 同じレシートに3回続けて自動読み取りが失敗した場合は、無限にリトライ
+    // させず（サーマル紙の色あせ等で読み取れないことも実際は多いため）
+    // 手入力用として写真付きでキューへ残す
+    const forceQueue = failStreakRef.current >= 2;
+    const result = await onCapture(dataUrl, forceQueue);
     setChecking(false);
-    setLastResult(recognized ? "success" : "fail");
-    if (recognized) {
+    setLastResult(result);
+    if (result === "success" || result === "manual") {
+      failStreakRef.current = 0;
       captureCountRef.current += 1;
       setCaptureCount(captureCountRef.current);
+    } else {
+      failStreakRef.current += 1;
     }
-    setFlash(recognized ? "success" : "fail");
+    setFlash(result === "success" ? "success" : result === "manual" ? "manual" : "fail");
     setTimeout(() => setFlash(null), 350);
     // 上限に達した場合は、あえて一時停止状態を解除しない
     // （＝読み取りボタンが再び押せる状態には戻さず、はっきり止める）
@@ -4019,6 +4067,8 @@ function ReceiptLiveScanner({ onCapture, onClose }) {
                 ? "border-rose-500"
                 : lastResult === "success"
                 ? "border-emerald-400"
+                : lastResult === "manual"
+                ? "border-sky-400"
                 : lastResult === "fail"
                 ? "border-rose-500"
                 : paused
@@ -4028,7 +4078,12 @@ function ReceiptLiveScanner({ onCapture, onClose }) {
           />
         )}
         {flash && (
-          <div className={"absolute inset-0 " + (flash === "success" ? "bg-emerald-300/60" : "bg-rose-400/60")} />
+          <div
+            className={
+              "absolute inset-0 " +
+              (flash === "success" ? "bg-emerald-300/60" : flash === "manual" ? "bg-sky-300/60" : "bg-rose-400/60")
+            }
+          />
         )}
         {status === "error" && (
           <div className="absolute inset-0 flex items-center justify-center p-6">
@@ -4042,6 +4097,7 @@ function ReceiptLiveScanner({ onCapture, onClose }) {
           {status === "live" && limitReached && `${MAX_SCAN_COUNT}枚に達しました。「スキャンを終える」から内容を確認・登録してください`}
           {status === "live" && !limitReached && checking && "文字を読み取っています…"}
           {status === "live" && !limitReached && !checking && lastResult === "success" && "読み取りました。次のレシートに入れ替えてください"}
+          {status === "live" && !limitReached && !checking && lastResult === "manual" && "自動では読み取れませんでした。手入力用に追加したので、あとで内容を入力してください"}
           {status === "live" && !limitReached && !checking && lastResult === "fail" && "うまく読み取れませんでした。もう一度かざしてください"}
           {status === "live" && !limitReached && !checking && !lastResult && !paused && "レシートを枠の中にかざしてください。文字が認識できたら自動で撮影します"}
           {status === "error" && "「スキャンを終える」で閉じて、もう一度お試しください"}
