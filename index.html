@@ -3873,7 +3873,10 @@ function ReceiptLiveScanner({ onCapture, onClose }) {
   const [flash, setFlash] = useState(null); // "success" | "fail" | null
   const [captureCount, setCaptureCount] = useState(0);
   const COOLDOWN_MS = 1200;
-  const MAX_SCAN_COUNT = 10;
+  // 撮影した写真はキュー登録するまで端末のメモリ上にのみ保持され、
+  // 登録時もexpensesには写真を含めないため、枚数を増やしても
+  // クラウド側の保存データが重くなることはない。30枚を上限にする。
+  const MAX_SCAN_COUNT = 30;
   const limitReached = captureCount >= MAX_SCAN_COUNT;
 
   useEffect(() => {
