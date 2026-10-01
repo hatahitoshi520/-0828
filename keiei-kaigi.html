@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<meta name="robots" content="noindex, nofollow">
+<title>喫茶すず〜 経営会議</title>
+<script src="https://cdn.tailwindcss.com"></script>
+
+<script crossorigin src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"
+  onerror="this.onerror=null;var s=document.createElement('script');s.src='https://unpkg.com/react@18/umd/react.production.min.js';s.crossOrigin='anonymous';document.head.appendChild(s);"></script>
+<script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"
+  onerror="this.onerror=null;var s=document.createElement('script');s.src='https://unpkg.com/react-dom@18/umd/react-dom.production.min.js';s.crossOrigin='anonymous';document.head.appendChild(s);"></script>
+<script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7/babel.min.js"
+  onerror="this.onerror=null;var s=document.createElement('script');s.src='https://unpkg.com/@babel/standalone@7/babel.min.js';document.head.appendChild(s);"></script>
+
+<style>
+  html, body { margin: 0; padding: 0; background: #f8fafc; }
+  #root { min-height: 100vh; }
+  #boot-error { display:none; color:#b91c1c; background:#fff1f2; font-family:monospace; font-size:12px; white-space:pre-wrap; padding:16px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div id="boot-error"></div>
+
+<script>
+/* ============================================================
+   自動バージョンチェック（Safari等のキャッシュ対策）
+   ★修正のたびに、下のAPP_VERSIONの値を必ず変更すること。
+   ============================================================ */
+const APP_VERSION = "2026-10-01-01";
+async function suzuCheckForNewVersion() {
+  try {
+    const res = await fetch(location.pathname + "?_v=" + Date.now(), { cache: "no-store" });
+    const html = await res.text();
+    const m = html.match(/const APP_VERSION = "([^"]+)"/);
+    if (m && m[1] && m[1] !== APP_VERSION) {
+      const url = new URL(location.href);
+      url.searchParams.set("_v", Date.now());
+      location.href = url.toString();
+    }
+  } catch (e) {
+    /* 通信エラーは無視し、次回チェックに任せる */
+  }
+}
+setInterval(suzuCheckForNewVersion, 30000);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") suzuCheckForNewVersion();
+});
+window.addEventListener("focus", suzuCheckForNewVersion);
+suzuCheckForNewVersion();
+
+/* ============================================================
+   Supabase（喫茶すずレジ本体と同じプロジェクト・同じテーブルを使用）
+   ------------------------------------------------------------
+   ・POSのデータ（kissa-suzu-pos-store）は「読み取り専用」で参照する
+     （売上・経費を会議の参考データとして使うだけで、書き換えない）
+   ・会議の記録は別の行（kissa-suzu-keiei-kaigi）に保存する
+   ============================================================ */
+const SUPABASE_URL = "https://txfzylywpdrcpashiwae.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_YqEkc-SyynhhH3GttVqq6Q_Uf9PeuVr";
+const POS_DATA_ROW_ID = "kissa-suzu-pos-store";
+const MEETING_ROW_ID = "kissa-suzu-keiei-kaigi";
+
+async function sbFetchRow(id) {
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/app_state?id=eq.${encodeURIComponent(id)}&select=data,updated_at`,
+    { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` } }
+  );
+  const rows = await res.json();
+  return rows && rows[0] ? rows[0] : null;
+}
+async function sbUpsertRow(id, dataObj) {
+  const updatedAt = new Date().toISOString();
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/app_state?on_conflict=id`, {
+    method: "POST",
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      "Content-Type": "application/json",
+      Prefer: "resolution=merge-duplicates,return=minimal",
+    },
+    body: JSON.stringify({ id, data: dataObj, updated_at: updatedAt }),
+  });
+  return res.ok ? updatedAt : null;
+}
+
+/* ============================================================
+   Anthropic（AIを直接呼び出す）
+   ------------------------------------------------------------
+   APIキーは本体のPOSと全く同じキー名でこの端末のlocalStorageに
+   保存する。そのため、同じ端末・同じブラウザで既にPOS側（品目タブ）
+   でキーを入力済みなら、このページでも改めて入力する必要はない。
+   ============================================================ */
+const ANTHROPIC_KEY_STORAGE = "suzu_anthropic_api_key";
+function getAnthropicApiKey() {
+  try { return localStorage.getItem(ANTHROPIC_KEY_STORAGE) || ""; } catch { return ""; }
+}
+function setAnthropicApiKeyLocal(key) {
+  try {
+    if (key) localStorage.setItem(ANTHROPIC_KEY_STORAGE, key);
+    else localStorage.removeItem(ANTHROPIC_KEY_STORAGE);
+  } catch { /* ignore */ }
+}
+async function callAnthropicMessages(body) {
+  const key = getAnthropicApiKey();
+  if (!key) {
+    const err = new Error("NO_API_KEY");
+    err.code = "NO_API_KEY";
+    throw err;
+  }
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": key,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`API error ${res.status}: ${text.slice(0, 200)}`);
+  }
+  return res.json();
+}
+function extractText(data) {
+  return (data.content || []).map((b) => (b.type === "text" ? b.text : "")).filter(Boolean).join("\n").trim();
+}
+
+/* ============================================================
+   合言葉（暗証番号）によるアクセス制限
+   ------------------------------------------------------------
+   スタッフ向けPOSとは別ページだが、URLを知れば誰でも開けてしまう
+   ため、簡単な合言葉で保護する。本格的なログイン機能ではないが、
+   うっかりスタッフや第三者が開いてしまうことを防ぐには十分。
+   ============================================================ */
+const KEIEI_PASSCODE = "suzukeiei0828";
+const UNLOCK_STORAGE = "suzu_keiei_unlocked";
+</script>
+
+<script id="app-source" type="text/plain">
+
+function PasscodeGate({ onUnlock }) {
+  const [val, setVal] = React.useState("");
+  const [error, setError] = React.useState("");
+  const submit = () => {
+    if (val === KEIEI_PASSCODE) {
+      try { localStorage.setItem(UNLOCK_STORAGE, "1"); } catch {}
+      onUnlock();
+    } else {
+      setError("合言葉が違います");
+    }
+  };
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-100 px-4">
+      <div className="bg-white rounded-2xl shadow p-6 w-full max-w-sm">
+        <div className="text-lg font-bold text-slate-800 mb-1">喫茶すず〜 経営会議</div>
+        <div className="text-xs text-slate-500 mb-4">オーナー専用ページです。合言葉を入力してください。</div>
+        <input
+          type="password"
+          className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm mb-2"
+          placeholder="合言葉"
+          value={val}
+          onChange={(e) => { setVal(e.target.value); setError(""); }}
+          onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+        />
+        {error && <div className="text-xs text-red-600 mb-2">{error}</div>}
+        <button onClick={submit} className="w-full bg-slate-800 text-white rounded-lg py-2 text-sm font-bold">
+          入る
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ApiKeyPrompt({ onSaved }) {
+  const [val, setVal] = React.useState("");
+  return (
+    <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 text-sm">
+      <div className="font-bold text-amber-800 mb-1">この端末にAIのAPIキーが設定されていません</div>
+      <div className="text-amber-700 text-xs mb-2">
+        POS本体の「品目」タブで入力したキーと同じものを、この端末用に入力してください。
+      </div>
+      <div className="flex gap-2">
+        <input
+          type="password"
+          className="flex-1 border border-amber-300 rounded-lg px-3 py-2 text-sm"
+          placeholder="sk-ant-..."
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+        />
+        <button
+          onClick={() => { if (val.trim()) { setAnthropicApiKeyLocal(val.trim()); onSaved(); } }}
+          className="bg-amber-600 text-white rounded-lg px-4 text-sm font-bold"
+        >
+          保存
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const PERSONAS = {
+  jimu: {
+    key: "jimu",
+    name: "事務AI",
+    icon: "💼",
+    bubble: "bg-teal-50 border-teal-200",
+    name_color: "text-teal-700",
+    role: "あなたは喫茶すず〜の事務担当のAI社員です。経費・コスト・業務効率化・キャッシュフローの視点から発言します。",
+  },
+  marketing: {
+    key: "marketing",
+    name: "マーケティングAI",
+    icon: "📈",
+    bubble: "bg-rose-50 border-rose-200",
+    name_color: "text-rose-700",
+    role: "あなたは喫茶すず〜のマーケティング担当のAI社員です。集客・SNS・販促・客単価アップなど、売上を伸ばす施策の視点から発言します。",
+  },
+};
+
+function mondayStartOf(d) {
+  const date = new Date(d);
+  const day = date.getDay();
+  const diff = (day === 0 ? -6 : 1) - day;
+  date.setDate(date.getDate() + diff);
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+function addDays(d, n) {
+  const x = new Date(d);
+  x.setDate(x.getDate() + n);
+  return x;
+}
+function ymdLabel(d) {
+  return d.toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" });
+}
+
+/* POSの実データ（売上・経費）から、会議で使う要約テキストを作る。
+   読みやすさより「AIが参照しやすい短いテキスト」を優先する。 */
+function buildDataSummary(posData) {
+  if (!posData) return "（売上データを取得できませんでした。最新の数字が無い前提で話してください）";
+  const orders = posData.orders || [];
+  const expenses = posData.expenses || [];
+  const now = new Date();
+  const thisMonday = mondayStartOf(now);
+  const lastMonday = addDays(thisMonday, -7);
+  const nextMonday = addDays(thisMonday, 7);
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  const thisWeekOrders = orders.filter((o) => o.time >= thisMonday.getTime() && o.time < nextMonday.getTime());
+  const lastWeekOrders = orders.filter((o) => o.time >= lastMonday.getTime() && o.time < thisMonday.getTime());
+  const monthOrders = orders.filter((o) => o.time >= monthStart.getTime());
+
+  const sum = (arr) => arr.reduce((s, o) => s + (o.total || 0), 0);
+  const thisWeekTotal = sum(thisWeekOrders);
+  const lastWeekTotal = sum(lastWeekOrders);
+  const monthTotal = sum(monthOrders);
+
+  const itemCount = {};
+  thisWeekOrders.forEach((o) => {
+    (o.lines || []).forEach((l) => {
+      itemCount[l.name] = (itemCount[l.name] || 0) + (l.qty || 0);
+    });
+  });
+  const topItems = Object.entries(itemCount).sort((a, b) => b[1] - a[1]).slice(0, 5)
+    .map(([n, q]) => `${n}(${q}点)`).join("、") || "（今週はまだ注文データなし）";
+
+  const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const monthExpenses = expenses.filter((e) => (e.date || "").startsWith(monthKey));
+  const expByCat = {};
+  monthExpenses.forEach((e) => {
+    expByCat[e.cat] = (expByCat[e.cat] || 0) + (Number(e.amount) || 0);
+  });
+  const expLines = Object.entries(expByCat).map(([c, v]) => `${c} ¥${v.toLocaleString()}`).join("、") || "（今月の経費データなし）";
+  const expTotal = Object.values(expByCat).reduce((s, v) => s + v, 0);
+
+  return [
+    `【今週(${ymdLabel(thisMonday)}〜) の売上】¥${thisWeekTotal.toLocaleString()}（${thisWeekOrders.length}件）`,
+    `【先週の売上】¥${lastWeekTotal.toLocaleString()}（${lastWeekOrders.length}件）`,
+    `【今月(${now.getMonth() + 1}月)の売上合計】¥${monthTotal.toLocaleString()}`,
+    `【今週よく出たメニュー】${topItems}`,
+    `【今月の経費内訳】${expLines}（合計 ¥${expTotal.toLocaleString()}）`,
+  ].join("\n");
+}
+
+function buildTranscript(messages) {
+  return messages
+    .filter((m) => m.speaker !== "system")
+    .map((m) => {
+      const label = m.speaker === "owner" ? "オーナー" : PERSONAS[m.speaker] ? PERSONAS[m.speaker].name : m.speaker;
+      return `[${label}] ${m.text}`;
+    })
+    .join("\n");
+}
+
+async function askPersona(personaKey, messages, dataSummary) {
+  const persona = PERSONAS[personaKey];
+  const system = `${persona.role}
+
+${dataSummary}
+
+これは複数人（オーナーと他のAI社員）が参加する会議です。これまでの会話の流れを読み、あなた（${persona.name}）としての次の発言だけを書いてください。他の人物のセリフを書いたり、前置き・名乗りは不要です。実際のデータに基づいた具体的な発言を心がけ、データに無いことは憶測で断定しないでください。2〜4文程度で簡潔にまとめてください。`;
+  const transcript = buildTranscript(messages);
+  const data = await callAnthropicMessages({
+    model: "claude-sonnet-5",
+    max_tokens: 350,
+    system,
+    messages: [{ role: "user", content: `これまでの会議の流れ:\n${transcript}\n\n上記を踏まえて、${persona.name}としての次の発言を書いてください。` }],
+  });
+  return extractText(data);
+}
+
+async function summarizeMeeting(messages) {
+  const transcript = buildTranscript(messages);
+  const data = await callAnthropicMessages({
+    model: "claude-sonnet-5",
+    max_tokens: 500,
+    system: "あなたは会議の書記です。説明文や前置きは一切書かず、指定された形式の箇条書きのみを出力してください。",
+    messages: [
+      {
+        role: "user",
+        content: `以下は喫茶すず〜の経営会議の会話記録です。これを読み、次の3つの見出しで簡潔な箇条書きにまとめてください。
+
+①話し合ったこと
+②決まったこと
+③次回までにやること
+
+会話記録:
+${transcript}`,
+      },
+    ],
+  });
+  return extractText(data);
+}
+
+function MessageBubble({ msg }) {
+  if (msg.speaker === "owner") {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[80%] bg-slate-800 text-white rounded-2xl rounded-tr-sm px-4 py-2 text-sm whitespace-pre-wrap">
+          {msg.text}
+        </div>
+      </div>
+    );
+  }
+  if (msg.speaker === "system") {
+    return <div className="text-center text-xs text-slate-400">{msg.text}</div>;
+  }
+  const persona = PERSONAS[msg.speaker] || { name: msg.speaker, icon: "🤖", bubble: "bg-slate-50 border-slate-200", name_color: "text-slate-600" };
+  return (
+    <div className="flex justify-start">
+      <div className={`max-w-[80%] border rounded-2xl rounded-tl-sm px-4 py-2 text-sm whitespace-pre-wrap ${persona.bubble}`}>
+        <div className={`text-xs font-bold mb-0.5 ${persona.name_color}`}>{persona.icon} {persona.name}</div>
+        {msg.text}
+      </div>
+    </div>
+  );
+}
+
+function KeieiKaigiApp() {
+  const [unlocked, setUnlocked] = React.useState(() => {
+    try { return localStorage.getItem(UNLOCK_STORAGE) === "1"; } catch { return false; }
+  });
+  const [loading, setLoading] = React.useState(true);
+  const [posData, setPosData] = React.useState(null);
+  const [dataSummary, setDataSummary] = React.useState("");
+  const [meetings, setMeetings] = React.useState([]);
+  const [hasApiKey, setHasApiKey] = React.useState(() => !!getAnthropicApiKey());
+  const [input, setInput] = React.useState("");
+  const [sending, setSending] = React.useState(false);
+  const [thinking, setThinking] = React.useState(null); // persona key currently "thinking"
+  const [expandedPast, setExpandedPast] = React.useState(null);
+  const [errorMsg, setErrorMsg] = React.useState("");
+  const bottomRef = React.useRef(null);
+  const meetingsRef = React.useRef(meetings);
+  React.useEffect(() => { meetingsRef.current = meetings; }, [meetings]);
+
+  const loadAll = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      const [posRow, meetingRow] = await Promise.all([sbFetchRow(POS_DATA_ROW_ID), sbFetchRow(MEETING_ROW_ID)]);
+      const pos = posRow ? posRow.data : null;
+      setPosData(pos);
+      setDataSummary(buildDataSummary(pos));
+      const list = meetingRow && meetingRow.data && meetingRow.data.meetings ? meetingRow.data.meetings : [];
+      setMeetings(list);
+    } catch (e) {
+      console.error("load failed", e);
+      setErrorMsg("データの読み込みに失敗しました。通信状態を確認して再読み込みしてください。");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (unlocked) loadAll();
+  }, [unlocked, loadAll]);
+
+  React.useEffect(() => {
+    if (bottomRef.current) bottomRef.current.scrollIntoView({ behavior: "smooth" });
+  }, [meetings, thinking]);
+
+  const saveMeetings = React.useCallback(async (nextMeetings) => {
+    setMeetings(nextMeetings);
+    try {
+      await sbUpsertRow(MEETING_ROW_ID, { meetings: nextMeetings });
+    } catch (e) {
+      console.error("save meeting failed", e);
+    }
+  }, []);
+
+  const activeMeeting = meetings.find((m) => !m.endedAt) || null;
+
+  const startNewMeeting = () => {
+    const m = { id: "m" + Date.now().toString(36), startedAt: new Date().toISOString(), endedAt: null, messages: [], summary: "" };
+    saveMeetings([...meetings, m]);
+  };
+
+  const sendMessage = async () => {
+    const text = input.trim();
+    if (!text || sending) return;
+    if (!getAnthropicApiKey()) { setHasApiKey(false); return; }
+    setInput("");
+    setSending(true);
+    setErrorMsg("");
+    const ownerMsg = { speaker: "owner", text, time: new Date().toISOString() };
+    let working = meetingsRef.current.map((m) => (m.id === activeMeeting.id ? { ...m, messages: [...m.messages, ownerMsg] } : m));
+    setMeetings(working);
+
+    try {
+      for (const personaKey of ["jimu", "marketing"]) {
+        setThinking(personaKey);
+        const current = working.find((m) => m.id === activeMeeting.id);
+        const reply = await askPersona(personaKey, current.messages, dataSummary);
+        const replyMsg = { speaker: personaKey, text: reply || "（発言を生成できませんでした）", time: new Date().toISOString() };
+        working = working.map((m) => (m.id === activeMeeting.id ? { ...m, messages: [...m.messages, replyMsg] } : m));
+        setMeetings(working);
+      }
+      await sbUpsertRow(MEETING_ROW_ID, { meetings: working });
+    } catch (e) {
+      console.error("send failed", e);
+      if (e.code === "NO_API_KEY") {
+        setHasApiKey(false);
+      } else {
+        setErrorMsg("AIからの返信取得に失敗しました（通信エラーまたはAPIの一時的な不調の可能性があります）。もう一度送信してみてください。");
+      }
+    } finally {
+      setThinking(null);
+      setSending(false);
+    }
+  };
+
+  const endMeeting = async () => {
+    if (!activeMeeting || sending) return;
+    setSending(true);
+    setThinking("summary");
+    try {
+      const summary = await summarizeMeeting(activeMeeting.messages);
+      const next = meetings.map((m) =>
+        m.id === activeMeeting.id ? { ...m, endedAt: new Date().toISOString(), summary: summary || "" } : m
+      );
+      await saveMeetings(next);
+    } catch (e) {
+      console.error("summarize failed", e);
+      if (e.code === "NO_API_KEY") {
+        setHasApiKey(false);
+      } else {
+        const next = meetings.map((m) =>
+          m.id === activeMeeting.id ? { ...m, endedAt: new Date().toISOString(), summary: "（まとめの自動生成に失敗しました）" } : m
+        );
+        await saveMeetings(next);
+      }
+    } finally {
+      setThinking(null);
+      setSending(false);
+    }
+  };
+
+  if (!unlocked) return <PasscodeGate onUnlock={() => setUnlocked(true)} />;
+  if (loading) return <div className="min-h-screen flex items-center justify-center text-slate-500 text-sm">読み込み中...</div>;
+
+  const pastMeetings = meetings.filter((m) => m.endedAt).sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt));
+
+  return (
+    <div className="min-h-screen bg-slate-100 flex flex-col">
+      <div className="bg-white border-b border-slate-200 px-4 py-3">
+        <div className="font-bold text-slate-800">喫茶すず〜 経営会議</div>
+        <div className="text-xs text-slate-500">オーナー × 事務AI × マーケティングAI</div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 max-w-2xl w-full mx-auto">
+        {errorMsg && <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg px-3 py-2">{errorMsg}</div>}
+
+        <details className="bg-white border border-slate-200 rounded-xl p-3 text-xs text-slate-600">
+          <summary className="cursor-pointer font-bold text-slate-700">参考データ（今日時点の実データ）</summary>
+          <pre className="whitespace-pre-wrap mt-2">{dataSummary}</pre>
+          <button onClick={loadAll} className="mt-2 text-teal-700 underline">データを更新する</button>
+        </details>
+
+        {!hasApiKey && <ApiKeyPrompt onSaved={() => setHasApiKey(true)} />}
+
+        {!activeMeeting && (
+          <div className="bg-white border border-slate-200 rounded-xl p-4 text-center">
+            <div className="text-sm text-slate-600 mb-3">現在、進行中の会議はありません。</div>
+            <button onClick={startNewMeeting} className="bg-slate-800 text-white rounded-lg px-5 py-2 text-sm font-bold">
+              新しい会議を始める
+            </button>
+          </div>
+        )}
+
+        {activeMeeting && (
+          <>
+            <div className="flex justify-between items-center">
+              <div className="text-xs text-slate-500">
+                会議開始: {new Date(activeMeeting.startedAt).toLocaleString("ja-JP")}
+              </div>
+              <button
+                onClick={endMeeting}
+                disabled={sending || activeMeeting.messages.length === 0}
+                className="text-xs bg-slate-200 text-slate-700 rounded-lg px-3 py-1.5 disabled:opacity-40"
+              >
+                この会議を終了してまとめる
+              </button>
+            </div>
+
+            {activeMeeting.messages.length === 0 && (
+              <div className="text-center text-xs text-slate-400 py-6">
+                下の入力欄から話しかけてみてください（例：「今週の売上どうだった？」）
+              </div>
+            )}
+
+            {activeMeeting.messages.map((m, i) => <MessageBubble key={i} msg={m} />)}
+
+            {thinking && thinking !== "summary" && (
+              <div className="flex justify-start">
+                <div className={`border rounded-2xl rounded-tl-sm px-4 py-2 text-xs text-slate-400 ${PERSONAS[thinking].bubble}`}>
+                  {PERSONAS[thinking].icon} {PERSONAS[thinking].name}が入力中...
+                </div>
+              </div>
+            )}
+            {thinking === "summary" && <div className="text-center text-xs text-slate-400">会議のまとめを作成中...</div>}
+            <div ref={bottomRef} />
+          </>
+        )}
+
+        {pastMeetings.length > 0 && (
+          <div className="pt-4">
+            <div className="text-xs font-bold text-slate-500 mb-2">過去の会議</div>
+            <div className="space-y-2">
+              {pastMeetings.map((m) => (
+                <div key={m.id} className="bg-white border border-slate-200 rounded-xl p-3">
+                  <button
+                    className="w-full text-left"
+                    onClick={() => setExpandedPast(expandedPast === m.id ? null : m.id)}
+                  >
+                    <div className="text-xs text-slate-500">
+                      {new Date(m.startedAt).toLocaleDateString("ja-JP")}（{m.messages.length}件の発言）
+                    </div>
+                    {m.summary && <pre className="whitespace-pre-wrap text-sm text-slate-700 mt-1">{m.summary}</pre>}
+                  </button>
+                  {expandedPast === m.id && (
+                    <div className="mt-3 space-y-2 border-t border-slate-100 pt-3">
+                      {m.messages.map((mm, i) => <MessageBubble key={i} msg={mm} />)}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {activeMeeting && (
+        <div className="bg-white border-t border-slate-200 px-4 py-3">
+          <div className="max-w-2xl mx-auto flex gap-2">
+            <input
+              className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm"
+              placeholder="発言を入力..."
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+              disabled={sending}
+            />
+            <button
+              onClick={sendMessage}
+              disabled={sending || !input.trim()}
+              className="bg-slate-800 text-white rounded-lg px-4 text-sm font-bold disabled:opacity-40"
+            >
+              送信
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(KeieiKaigiApp));
+</script>
+
+<script>
+  function suzuBoot(attempt) {
+    attempt = attempt || 0;
+    if (typeof Babel === 'undefined' || typeof React === 'undefined' || typeof ReactDOM === 'undefined') {
+      if (attempt < 15) {
+        setTimeout(function() { suzuBoot(attempt + 1); }, 200);
+        return;
+      }
+      var el = document.getElementById('boot-error');
+      el.style.display = 'block';
+      el.textContent = 'CDNからのライブラリ読み込みに失敗しました（React/ReactDOM/Babelのいずれか）。\n'
+        + 'React defined: ' + (typeof React !== 'undefined')
+        + ' / ReactDOM defined: ' + (typeof ReactDOM !== 'undefined')
+        + ' / Babel defined: ' + (typeof Babel !== 'undefined');
+      return;
+    }
+    try {
+      var src = document.getElementById('app-source').textContent;
+      var output = Babel.transform(src, {
+        presets: [["react", { runtime: "classic" }]],
+      }).code;
+      var s = document.createElement('script');
+      s.textContent = output;
+      document.body.appendChild(s);
+    } catch (e) {
+      var el = document.getElementById('boot-error');
+      el.style.display = 'block';
+      el.textContent = '起動時エラー:\n' + (e.stack || e.message || e);
+      console.error(e);
+    }
+  }
+  suzuBoot();
+</script>
+
+</body>
+</html>
