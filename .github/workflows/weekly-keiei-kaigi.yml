@@ -1,0 +1,24 @@
+name: 経営会議 週次自動実行
+
+# 毎週月曜 朝7:30(日本時間) に自動実行。
+# 日本時間 = UTC + 9時間 のため、UTCでは「日曜 22:30」を指定する。
+# ※GitHub Actionsのスケジュールは数分〜場合によってはそれ以上、
+#   実行開始が遅れることがある（GitHub側の仕様）。
+on:
+  schedule:
+    - cron: "30 22 * * 0"
+  workflow_dispatch: {}
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: 週次の経営会議を自動実行
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+        run: node scripts/weekly-keiei-kaigi.mjs
