@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Team Studio | Claude Code を「AIチーム」に組み替える構築代行</title>
+<meta name="description" content="司令塔・実働・監査・仕分けの4層構成で、Claude Code を役割分担したAIチームに。既存設定を診断し、すべての変更をdiffで提示、あなたの「go」が出るまで1行も書き換えません。">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🧭</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#08090f; --bg-soft:#0d0f1a; --panel:#12141f; --panel-border:rgba(255,255,255,.08);
+    --text:#f3f4f8; --text-dim:#9498ab;
+    --opus:#ff9f43; --sonnet:#7c5cff; --fable:#35d4c7; --fast:#ff4d8d;
+    --grad:linear-gradient(135deg,var(--opus),var(--sonnet) 55%,var(--fable));
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:"Noto Sans JP","Hiragino Sans",sans-serif;-webkit-font-smoothing:antialiased;overflow-x:hidden;line-height:1.7}
+  h1,h2,h3{font-family:"Space Grotesk","Noto Sans JP",sans-serif;letter-spacing:-.01em;line-height:1.3}
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:1120px;margin:0 auto;padding:0 24px}
+  .grad-text{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:14px 28px;border-radius:999px;font-weight:700;font-size:15px;border:1px solid transparent;transition:transform .15s,box-shadow .15s;white-space:nowrap}
+  .btn:active{transform:scale(.97)}
+  .btn-primary{background:var(--grad);color:#08090f;box-shadow:0 8px 30px -8px rgba(124,92,255,.6)}
+  .btn-ghost{background:rgba(255,255,255,.04);border-color:var(--panel-border)}
+  header.site{position:sticky;top:0;z-index:50;backdrop-filter:blur(14px);background:rgba(8,9,15,.72);border-bottom:1px solid var(--panel-border)}
+  .nav-row{display:flex;align-items:center;justify-content:space-between;height:68px}
+  .logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:18px}
+  .logo .mark{width:34px;height:34px;border-radius:10px;background:var(--grad);display:flex;align-items:center;justify-content:center}
+  nav.links{display:flex;gap:28px;font-size:14px;color:var(--text-dim)}
+  nav.links a:hover{color:var(--text)}
+  section{padding:96px 0}
+  .eyebrow{display:inline-block;font-size:12.5px;font-weight:700;letter-spacing:.12em;color:var(--fable);margin-bottom:14px}
+  .section-title{font-size:clamp(26px,4vw,38px);margin:0 0 16px}
+  .section-lead{color:var(--text-dim);max-width:680px;margin:0 0 48px}
+  /* hero */
+  .hero{padding:110px 0 80px;position:relative}
+  .hero::before{content:"";position:absolute;inset:-200px 0 auto;height:600px;background:radial-gradient(600px 300px at 30% 30%,rgba(124,92,255,.25),transparent),radial-gradient(500px 260px at 75% 40%,rgba(255,159,67,.16),transparent);pointer-events:none}
+  .hero-grid{display:grid;grid-template-columns:1.05fr 1fr;gap:56px;align-items:center;position:relative}
+  .hero h1{font-size:clamp(30px,4.2vw,50px);margin:0 0 22px;font-weight:900}
+  .hero p.lead{color:var(--text-dim);font-size:16.5px;margin:0 0 32px}
+  .hero-cta{display:flex;gap:14px;flex-wrap:wrap}
+  .hero-note{margin-top:18px;font-size:12.5px;color:var(--text-dim)}
+  /* tree */
+  .tree{background:var(--panel);border:1px solid var(--panel-border);border-radius:20px;padding:26px;display:flex;flex-direction:column;gap:12px}
+  .node{border-radius:14px;padding:14px 16px;border:1px solid var(--panel-border);background:var(--bg-soft);display:flex;justify-content:space-between;align-items:center;gap:12px}
+  .node b{font-size:15px}
+  .node small{color:var(--text-dim);font-size:12.5px;display:block}
+  .tag{font-family:"JetBrains Mono",monospace;font-size:11.5px;padding:4px 10px;border-radius:999px;white-space:nowrap}
+  .n-opus{border-left:4px solid var(--opus)} .n-opus .tag{background:rgba(255,159,67,.14);color:var(--opus)}
+  .n-sonnet{border-left:4px solid var(--sonnet)} .n-sonnet .tag{background:rgba(124,92,255,.16);color:#a995ff}
+  .n-fable{border-left:4px solid var(--fable)} .n-fable .tag{background:rgba(53,212,199,.14);color:var(--fable)}
+  .n-fast{border-left:4px solid var(--fast)} .n-fast .tag{background:rgba(255,77,141,.14);color:var(--fast)}
+  .workers{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding-left:18px}
+  .workers .node{flex-direction:column;align-items:flex-start;padding:12px}
+  .arrow{text-align:center;color:var(--text-dim);font-size:12px;line-height:1}
+  /* cards */
+  .grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
+  .grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+  .card{background:var(--panel);border:1px solid var(--panel-border);border-radius:18px;padding:26px}
+  .card h3{margin:0 0 8px;font-size:18px}
+  .card p{margin:0;color:var(--text-dim);font-size:14px}
+  .card .who{font-family:"JetBrains Mono",monospace;font-size:12px;margin-bottom:12px;display:inline-block}
+  .problem{display:flex;gap:14px;align-items:flex-start}
+  .problem .x{flex:none;width:30px;height:30px;border-radius:50%;background:rgba(255,77,141,.14);color:var(--fast);display:flex;align-items:center;justify-content:center;font-weight:900}
+  /* advisor timing */
+  .timing{counter-reset:t}
+  .timing .card{position:relative;padding-top:54px}
+  .timing .card::before{counter-increment:t;content:counter(t);position:absolute;top:20px;left:26px;width:26px;height:26px;border-radius:50%;background:rgba(53,212,199,.16);color:var(--fable);font-weight:900;font-size:13px;display:flex;align-items:center;justify-content:center}
+  .quote{margin-top:14px;font-size:13.5px;color:var(--fable);font-style:normal}
+  /* steps */
+  .steps{display:flex;flex-direction:column;gap:14px;max-width:820px}
+  .step{display:grid;grid-template-columns:56px 1fr;gap:18px;align-items:start;background:var(--panel);border:1px solid var(--panel-border);border-radius:16px;padding:20px 22px}
+  .step .num{font-family:"Space Grotesk";font-size:28px;font-weight:700;color:var(--sonnet)}
+  .step h3{margin:0 0 4px;font-size:17px}
+  .step p{margin:0;color:var(--text-dim);font-size:14px}
+  .step.go{border-color:rgba(53,212,199,.45)}
+  .step.go .num{color:var(--fable)}
+  pre.diff{background:#05060a;border:1px solid var(--panel-border);border-radius:14px;padding:18px;font-family:"JetBrains Mono",monospace;font-size:12.5px;overflow-x:auto;margin:28px 0 0;max-width:820px;line-height:1.6}
+  .d-add{color:#5ee0a0} .d-del{color:#ff7b9c} .d-meta{color:var(--text-dim)}
+  /* pricing */
+  .price-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;align-items:stretch}
+  .price-card{background:var(--panel);border:1px solid var(--panel-border);border-radius:20px;padding:26px 22px;display:flex;flex-direction:column;position:relative}
+  .price-card.hl{border-color:var(--sonnet);box-shadow:0 0 0 1px var(--sonnet),0 24px 60px -20px rgba(124,92,255,.35)}
+  .badge{position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:var(--grad);color:#08090f;font-size:11.5px;font-weight:800;padding:4px 14px;border-radius:999px;white-space:nowrap}
+  .price-card h3{margin:0 0 4px;font-size:17px}
+  .price-card .desc{font-size:12.5px;color:var(--text-dim);margin:0 0 18px}
+  .amount{font-size:30px;font-weight:900}
+  .amount span{font-size:13px;color:var(--text-dim);font-weight:500}
+  .price-card ul{list-style:none;padding:0;margin:18px 0 24px;display:flex;flex-direction:column;gap:9px;flex:1}
+  .price-card li{font-size:13px;color:var(--text-dim);padding-left:20px;position:relative}
+  .price-card li::before{content:"✓";position:absolute;left:0;color:var(--fable);font-weight:700}
+  .tax{font-size:12px;color:var(--text-dim);margin-top:16px}
+  /* faq */
+  details{background:var(--panel);border:1px solid var(--panel-border);border-radius:14px;padding:18px 22px;margin-bottom:12px;max-width:820px}
+  summary{cursor:pointer;font-weight:700;font-size:15px}
+  details p{color:var(--text-dim);font-size:14px;margin:12px 0 0}
+  .cta-final{text-align:center;background:var(--panel);border:1px solid var(--panel-border);border-radius:28px;padding:64px 24px}
+  .cta-final h2{font-size:clamp(24px,4vw,36px);margin:0 0 14px}
+  .cta-final p{color:var(--text-dim);margin:0 0 30px}
+  footer{border-top:1px solid var(--panel-border);padding:36px 0;color:var(--text-dim);font-size:12.5px}
+  footer p{margin:4px 0}
+  @media (max-width:960px){
+    .hero-grid{grid-template-columns:1fr;gap:40px}
+    .grid-4,.price-grid{grid-template-columns:repeat(2,1fr)}
+    .grid-3{grid-template-columns:1fr}
+    nav.links{display:none}
+  }
+  @media (max-width:600px){
+    .wrap{padding:0 16px}
+    section{padding:72px 0}
+    .hero{padding:72px 0 56px}
+    .grid-4,.price-grid{grid-template-columns:1fr}
+    .workers{grid-template-columns:1fr;padding-left:10px}
+    .step{grid-template-columns:1fr;gap:4px}
+    .nav-row .btn{padding:10px 16px;font-size:13px}
+  }
+</style>
+</head>
+<body>
+
+<header class="site">
+  <div class="wrap nav-row">
+    <a href="#" class="logo"><span class="mark">🧭</span>AI Team Studio</a>
+    <nav class="links">
+      <a href="#structure">4層構成</a>
+      <a href="#advisor">監査役</a>
+      <a href="#process">導入の流れ</a>
+      <a href="#pricing">料金</a>
+      <a href="#faq">よくある質問</a>
+    </nav>
+    <a href="#contact" class="btn btn-primary">無料診断</a>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div>
+        <span class="eyebrow">CLAUDE CODE 構築代行・研修</span>
+        <h1>1人のAIを、<br><span class="grad-text">AIチーム</span>に変える。</h1>
+        <p class="lead">役割分担で、速く・安く・迷わない開発へ。司令塔が決め、実働部隊が働き、監査役が疑う。Claude Code を4層構成に組み替えて、大きなモデルは「本当に考えるべき判断」だけに集中させます。</p>
+        <div class="hero-cta">
+          <a href="#contact" class="btn btn-primary">30分の無料診断を申し込む</a>
+          <a href="#structure" class="btn btn-ghost">構成を見る</a>
+        </div>
+        <p class="hero-note">すべての変更を diff で提示。あなたの「go」が出るまで、1行も書き換えません。</p>
+      </div>
+
+      <div class="tree" id="structure" aria-label="4層構成のツリー図">
+        <div class="node n-opus"><div><b>司令塔</b><small>全体計画・タスク分解・統合・最終出荷</small></div><span class="tag">Opus / high</span></div>
+        <div class="arrow">↓ 指示</div>
+        <div class="workers">
+          <div class="node n-sonnet"><b>explorer</b><small>コードを読む</small><span class="tag">Sonnet / medium</span></div>
+          <div class="node n-sonnet"><b>worker</b><small>編集・テスト</small><span class="tag">Sonnet / medium</span></div>
+          <div class="node n-sonnet"><b>researcher</b><small>ドキュメント調査</small><span class="tag">Sonnet / medium</span></div>
+        </div>
+        <div class="arrow">↓ 要所でだけ相談</div>
+        <div class="node n-fable"><div><b>監査役（advisor）</b><small>計画前・エラー反復時・完了直前の3回だけ</small></div><span class="tag">Fable</span></div>
+        <div class="arrow">↓ 定型判断を委任</div>
+        <div class="node n-fast"><div><b>高速ルーティング</b><small>見るファイル・呼ぶツール・再試行・停止</small></div><span class="tag">軽量モデル</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section style="background:var(--bg-soft)">
+    <div class="wrap">
+      <span class="eyebrow">PROBLEM</span>
+      <h2 class="section-title">こんな使い方になっていませんか？</h2>
+      <p class="section-lead">高性能なモデルを1つだけ使い続けると、遅く、高く、しかも迷子になりやすくなります。</p>
+      <div class="grid-4">
+        <div class="card problem"><span class="x">×</span><div><h3>全部を大きいモデルで</h3><p>ファイル検索のような作業まで最上位モデルが担当していて、遅くて高い。</p></div></div>
+        <div class="card problem"><span class="x">×</span><div><h3>サブエージェントが放置</h3><p>作ったものの役割が重なり、どれが呼ばれるのか分からない。</p></div></div>
+        <div class="card problem"><span class="x">×</span><div><h3>同じエラーを延々と</h3><p>「そもそも掘る場所が違う」と気づく仕組みがない。</p></div></div>
+        <div class="card problem"><span class="x">×</span><div><h3>設定が人ごとにバラバラ</h3><p>~/.claude と .claude/ の使い分けルールがチームにない。</p></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <span class="eyebrow">ROLES</span>
+      <h2 class="section-title">高レベルはOpus、中レベルはSonnet。<br>判断の監査はFable、細かい分岐は軽量モデル。</h2>
+      <p class="section-lead">それぞれのモデルを得意な仕事に置くことで、速さ・コスト・品質のバランスを取ります。</p>
+      <div class="grid-4">
+        <div class="card"><span class="who" style="color:var(--opus)">Opus / high</span><h3>司令塔</h3><p>全体計画とタスク分解、成果の統合、最終的な出荷判断を担当します。</p></div>
+        <div class="card"><span class="who" style="color:#a995ff">Sonnet / medium</span><h3>実働部隊</h3><p>explorer・worker・researcher の3ロール。既存のサブエージェントを活かし、足りない役だけ新規作成します。</p></div>
+        <div class="card"><span class="who" style="color:var(--fable)">Fable</span><h3>監査役</h3><p>普段は待機。セッション全体を見たうえで、決まった3つのタイミングだけ口を出します。</p></div>
+        <div class="card"><span class="who" style="color:var(--fast)">軽量モデル</span><h3>高速ルーティング</h3><p>大きなモデルで考えるまでもない定型の判断を、速く安いモデルに任せます。</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="advisor" style="background:var(--bg-soft)">
+    <div class="wrap">
+      <span class="eyebrow">ADVISOR</span>
+      <h2 class="section-title">Sonnetが働き、Fableが疑い、Opusが決める。</h2>
+      <p class="section-lead">監査役が相談を受けるタイミングを CLAUDE.md にルールとして書き込みます。</p>
+      <div class="grid-3 timing">
+        <div class="card"><h3>大きな計画を確定する前</h3><p>方針を決めてから作業に入る、その直前に確認します。</p><p class="quote">「このアプローチで本当にいいか？」</p></div>
+        <div class="card"><h3>同じエラーが繰り返した時</h3><p>同じ失敗が続いたら、手を止めて方向を見直します。</p><p class="quote">「そもそも掘る場所を間違えていないか？」</p></div>
+        <div class="card"><h3>長時間タスクを完了扱いにする直前</h3><p>「終わりました」と報告する前に、抜け漏れを点検します。</p><p class="quote">「何か見落としていないか？」</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="process">
+    <div class="wrap">
+      <span class="eyebrow">PROCESS</span>
+      <h2 class="section-title">勝手に書き換えない、5つのステップ</h2>
+      <p class="section-lead">お客様の環境を壊さないことを最優先にしています。</p>
+      <div class="steps">
+        <div class="step"><div class="num">01</div><div><h3>診断</h3><p>~/.claude/agents、.claude/agents、~/.claude/settings.json を読み取り専用で確認します。</p></div></div>
+        <div class="step"><div class="num">02</div><div><h3>棚卸し</h3><p>既存のサブエージェントを explorer / worker / researcher に当てはめます。別のモデルに固定済みのものは変更せず、一覧にしてお渡しします。</p></div></div>
+        <div class="step"><div class="num">03</div><div><h3>阻害要因のチェック</h3><p>advisor や effort 設定を無効化・上書きしうる環境変数や設定を洗い出し、報告だけ行います。</p></div></div>
+        <div class="step"><div class="num">04</div><div><h3>diff の提示</h3><p>settings.json、エージェント定義、CLAUDE.md への変更をすべて diff 形式でご提示します。</p></div></div>
+        <div class="step go"><div class="num">05</div><div><h3>「go」で適用</h3><p>ご承認をいただいてから適用し、動作確認と引き継ぎ資料の作成まで行います。</p></div></div>
+      </div>
+<pre class="diff" aria-label="diff の例"><span class="d-meta">--- a/.claude/agents/worker.md
++++ b/.claude/agents/worker.md</span>
+ ---
+ name: worker
+ description: 編集とテストを担当する実働エージェント
+<span class="d-del">-model: inherit</span>
+<span class="d-add">+model: sonnet</span>
+ ---</pre>
+    </div>
+  </section>
+
+  <section id="pricing" style="background:var(--bg-soft)">
+    <div class="wrap">
+      <span class="eyebrow">PRICING</span>
+      <h2 class="section-title">料金プラン</h2>
+      <p class="section-lead">AIの利用料はお客様ご自身のアカウントでのお支払いです。当サービスの料金は、構築・研修の作業に対する費用です。</p>
+      <div class="price-grid">
+        <div class="price-card"><h3>無料診断</h3><p class="desc">まずは現状を一緒に確認</p><div class="amount">0<span>円 / 30分</span></div><ul><li>オンライン面談</li><li>現在の設定の確認</li><li>4層構成が合うかの判断</li></ul><a href="#contact" class="btn btn-ghost">申し込む</a></div>
+        <div class="price-card hl"><span class="badge">はじめての方に</span><h3>スターター</h3><p class="desc">個人の開発環境 1つ</p><div class="amount">98,000<span>円</span></div><ul><li>4層構成の設計と構築</li><li>サブエージェント3ロール</li><li>監査役の相談ルール</li><li>全変更の diff 提示</li><li>30日間のチャットサポート</li></ul><a href="#contact" class="btn btn-primary">相談する</a></div>
+        <div class="price-card"><h3>チーム導入</h3><p class="desc">開発チーム向け</p><div class="amount">298,000<span>円</span></div><ul><li>スターターの内容すべて</li><li>3リポジトリまで対応</li><li>共有 .claude/ の運用設計</li><li>研修 2時間 × 2回</li></ul><a href="#contact" class="btn btn-ghost">相談する</a></div>
+        <div class="price-card"><h3>顧問</h3><p class="desc">導入後の継続サポート</p><div class="amount">49,800<span>円 / 月</span></div><ul><li>新モデル・新機能への追随</li><li>月1回の設定見直し</li><li>チャットでの随時相談</li></ul><a href="#contact" class="btn btn-ghost">相談する</a></div>
+      </div>
+      <p class="tax">※ 表示価格はすべて税抜です。</p>
+    </div>
+  </section>
+
+  <section id="faq">
+    <div class="wrap">
+      <span class="eyebrow">FAQ</span>
+      <h2 class="section-title">よくある質問</h2>
+      <details><summary>Anthropic社の公式サービスですか？</summary><p>いいえ。当サービスは Anthropic社とは関係のない、独立した構築代行・研修サービスです。</p></details>
+      <details><summary>advisor 機能が自分の環境で使えるか分かりません。</summary><p>使える機能はプランや Claude Code のバージョンによって変わります。無料診断で実際に確認し、使えない場合は「監査役のサブエージェント」など、使える仕組みで同じ役割を作ります。</p></details>
+      <details><summary>ソースコードや秘密情報を渡す必要はありますか？</summary><p>ありません。作業はお客様の環境で、画面共有をしながら行います。ご希望があれば秘密保持契約（NDA）を結びます。</p></details>
+      <details><summary>すでに作ったサブエージェントは消されますか？</summary><p>消しません。既存のものを活かし、足りない役割だけを新しく作ります。別のモデルに固定されているエージェントは変更せず、一覧にしてお伝えします。</p></details>
+      <details><summary>AIの利用料はいくらかかりますか？</summary><p>使い方によって変わります。定型の作業を軽いモデルに任せるので、大きなモデル1つで全部こなす場合より抑えやすい構成です。目安は診断のときにお伝えします。</p></details>
+    </div>
+  </section>
+
+  <section id="contact" style="padding-top:0">
+    <div class="wrap">
+      <div class="cta-final">
+        <h2>まずは <span class="grad-text">30分の無料診断</span> から</h2>
+        <p>今の設定を一緒に見て、4層構成があなたの開発に合うかを判断します。</p>
+        <a href="mailto:contact@example.com?subject=AI%20Team%20Studio%20%E7%84%A1%E6%96%99%E8%A8%BA%E6%96%AD" class="btn btn-primary">メールで申し込む</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>© 2026 AI Team Studio（仮称）</p>
+    <p>Claude、Claude Code は Anthropic, PBC の商標です。当サービスは Anthropic社とは関係のない、独立したサービスです。</p>
+  </div>
+</footer>
+
+</body>
+</html>
