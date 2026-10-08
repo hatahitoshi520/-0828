@@ -39,7 +39,7 @@
    URL（クエリ付き）へ自動的に移動して最新版を読み込み直す。
    ★修正のたびに、下のAPP_VERSIONの値を必ず変更すること。
    ============================================================ */
-const APP_VERSION = "2026-09-30-01";
+const APP_VERSION = "2026-10-08-01";
 async function suzuCheckForNewVersion() {
   try {
     const res = await fetch(location.pathname + "?_v=" + Date.now(), { cache: "no-store" });
@@ -1632,6 +1632,7 @@ function PosRegister() {
   const todayTotal = orders
     .filter((o) => new Date(o.time).toDateString() === new Date().toDateString())
     .reduce((s, o) => s + o.total, 0);
+  const monthTotal = buildMonthStats(orders, new Date()).total;
 
   /* ============================================================
      ★ 営業終了レポート（本日の売上サマリーをLINEに送信）
@@ -2599,6 +2600,8 @@ function PosRegister() {
         <div className="text-right text-xs text-slate-400">
           <div>本日売上</div>
           <div className="text-amber-300 font-bold text-base">{yen(todayTotal)}</div>
+          <div className="mt-1 pt-1 border-t border-slate-700">今月売上</div>
+          <div className="text-teal-300 font-bold text-sm">{yen(monthTotal)}</div>
         </div>
       </header>
 
@@ -3199,6 +3202,19 @@ function PosRegister() {
 
         {tab === "report" && (
           <div className="p-3 space-y-4">
+            <div>
+              <div className="text-amber-400 text-xs font-bold tracking-widest mb-1.5">月次比較（全端末共有）</div>
+              <div className="grid grid-cols-2 gap-2">
+                {[buildMonthStats(orders, new Date()), buildMonthStats(orders, new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1))].map((m, i) => (
+                  <div key={i} className="bg-slate-800 rounded-lg px-3 py-2 border border-slate-700">
+                    <div className="text-slate-400 text-xs">{m.label}{i === 0 ? "（今月）" : "（先月）"}</div>
+                    <div className="text-amber-300 font-bold">{yen(m.total)}</div>
+                    <div className="text-slate-500 text-[11px]">{m.orderCount}件</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
             <div className="bg-teal-900/40 rounded-lg p-3 border border-teal-800">
               <div className="text-teal-300 text-xs font-bold tracking-widest mb-1.5">営業終了処理</div>
               <div className="flex items-center justify-between mb-2">
@@ -3256,19 +3272,6 @@ function PosRegister() {
                 <button onClick={saveStoreArea} className="bg-amber-500 text-slate-900 rounded-lg px-3 py-1.5 text-sm font-bold shrink-0">
                   保存
                 </button>
-              </div>
-            </div>
-
-            <div>
-              <div className="text-amber-400 text-xs font-bold tracking-widest mb-1.5">月次比較（全端末共有）</div>
-              <div className="grid grid-cols-2 gap-2">
-                {[buildMonthStats(orders, new Date()), buildMonthStats(orders, new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1))].map((m, i) => (
-                  <div key={i} className="bg-slate-800 rounded-lg px-3 py-2 border border-slate-700">
-                    <div className="text-slate-400 text-xs">{m.label}{i === 0 ? "（今月）" : "（先月）"}</div>
-                    <div className="text-amber-300 font-bold">{yen(m.total)}</div>
-                    <div className="text-slate-500 text-[11px]">{m.orderCount}件</div>
-                  </div>
-                ))}
               </div>
             </div>
 
