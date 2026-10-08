@@ -1,0 +1,2 @@
+# 有料の納品データ（デプロイ時に生成。公開リポジトリには入れない）
+supabase/functions/ai-team-shop/content.ts
