@@ -63,7 +63,10 @@ async function load(retry = 0) {
     // 決済直後は Stripe 側の確定が数秒遅れることがあるので、少し待って再確認する
     if (res.status === 402 && retry < 5) return setTimeout(() => load(retry + 1), 3000);
     if (!res.ok) return showError(data.error || "読み込みに失敗しました。");
-    document.getElementById("guide").innerHTML = marked.parse(data.guide);
+    const fence = (t) => (t.includes("```") ? "````" : "```");
+    const filesMd = "\n\n## 全ファイル\n\n置き場所：`agents/` の5つは `~/.claude/agents/`（全プロジェクト共通）または `.claude/agents/`（このプロジェクトだけ）に置きます。残りは作業フォルダに置き、`setup-prompt.md` の手順で Claude Code に取り込ませてください。\n\n" +
+      Object.entries(data.files).map(([path, text]) => `### ${path}\n\n${fence(text)}\n${text.replace(/\n$/, "")}\n${fence(text)}\n`).join("\n");
+    document.getElementById("guide").innerHTML = marked.parse(data.guide + filesMd);
     document.getElementById("download").onclick = async () => {
       const zip = new JSZip();
       for (const [path, text] of Object.entries(data.files)) zip.file(`ai-team-starter/${path}`, text);

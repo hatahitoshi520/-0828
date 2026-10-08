@@ -2,12 +2,34 @@
 //   GET ?action=buy                      → Stripe の決済ページへ転送（商品と決済リンクは初回に自動作成）
 //   GET ?action=deliver&session_id=cs_…  → 支払い済みなら納品データ（ガイド＋全ファイル）を返す
 // 必要なシークレット：STRIPE_SECRET_KEY（制限付きキー可：Products / Prices / Payment Links の書き込み、Checkout Sessions の読み取り）
-import { GUIDE_MARKDOWN, FILES } from "./content.ts";
+import { GUIDE_MARKDOWN } from "./content.ts";
 
 const APP = "ai-team-starter";
 const PRICE_JPY = 500;
 const THANKS_URL = Deno.env.get("THANKS_URL") ??
   "https://hatahitoshi520.github.io/-0828/ai-team-starter-thanks.html";
+
+// テンプレート本体は公開リポジトリにあるので、納品時に GitHub から取得する（有料なのはガイド本文のみ）。
+const TEMPLATE_REPO = "hatahitoshi520/-0828";
+const TEMPLATE_REF = Deno.env.get("TEMPLATE_REF") ?? "main";
+const TEMPLATE_FILES = [
+  "README.md", "CLAUDE.md.snippet", "settings.example.json", "setup-prompt.md", "check-env.sh",
+  "agents/explorer.md", "agents/worker.md", "agents/researcher.md", "agents/router.md", "agents/auditor.md",
+];
+let filesCache: { at: number; files: Record<string, string> } | null = null;
+
+async function loadTemplateFiles(): Promise<Record<string, string>> {
+  if (filesCache && Date.now() - filesCache.at < 10 * 60_000) return filesCache.files;
+  const entries = await Promise.all(TEMPLATE_FILES.map(async (f) => {
+    const res = await fetch(
+      `https://raw.githubusercontent.com/${TEMPLATE_REPO}/${TEMPLATE_REF}/templates/ai-team-starter/${f}`,
+    );
+    if (!res.ok) throw new Error(`template ${f}: ${res.status}`);
+    return [f, await res.text()] as const;
+  }));
+  filesCache = { at: Date.now(), files: Object.fromEntries(entries) };
+  return filesCache.files;
+}
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -98,7 +120,7 @@ Deno.serve(async (req) => {
     if (action === "deliver") {
       const ok = await isPaidForThisProduct(url.searchParams.get("session_id") ?? "");
       if (!ok) return json({ error: "支払いを確認できませんでした。" }, 402);
-      return json({ guide: GUIDE_MARKDOWN, files: FILES });
+      return json({ guide: GUIDE_MARKDOWN, files: await loadTemplateFiles() });
     }
     return json({ error: "unknown action" }, 400);
   } catch (e) {
