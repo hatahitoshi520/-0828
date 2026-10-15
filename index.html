@@ -39,7 +39,7 @@
    URL（クエリ付き）へ自動的に移動して最新版を読み込み直す。
    ★修正のたびに、下のAPP_VERSIONの値を必ず変更すること。
    ============================================================ */
-const APP_VERSION = "2026-10-08-01";
+const APP_VERSION = "2026-10-16-01";
 async function suzuCheckForNewVersion() {
   try {
     const res = await fetch(location.pathname + "?_v=" + Date.now(), { cache: "no-store" });
@@ -1037,7 +1037,31 @@ const DEFAULT_CHECKLIST_ITEMS = {
     { text: "看板・のれんをしまう" },
     { text: "施錠・戸締りを確認する" },
   ],
+  // ★曜日ごとのタスク（例：水曜は換気扇清掃、土曜は在庫棚卸し、など）。
+  // 開店・閉店チェックと同じ仕組みで、曜日ごとに項目を自由に追加・チェックできる。
+  mon: [],
+  tue: [],
+  wed: [],
+  thu: [],
+  fri: [],
+  sat: [],
+  sun: [],
 };
+const WEEKDAY_CHECK_TYPES = [
+  { key: "mon", label: "月", dayIndex: 1 },
+  { key: "tue", label: "火", dayIndex: 2 },
+  { key: "wed", label: "水", dayIndex: 3 },
+  { key: "thu", label: "木", dayIndex: 4 },
+  { key: "fri", label: "金", dayIndex: 5 },
+  { key: "sat", label: "土", dayIndex: 6 },
+  { key: "sun", label: "日", dayIndex: 0 },
+];
+function checklistTypeLabel(t) {
+  if (t === "open") return "開店";
+  if (t === "close") return "閉店";
+  const w = WEEKDAY_CHECK_TYPES.find((w) => w.key === t);
+  return w ? `${w.label}曜タスク` : t;
+}
 const CHECKLIST_RETENTION_DAYS = 14;
 function pruneChecklistLogs(logs) {
   const cutoff = Date.now() - CHECKLIST_RETENTION_DAYS * 24 * 60 * 60 * 1000;
@@ -3326,7 +3350,7 @@ function PosRegister() {
         {tab === "check" && (
           <div className="p-3 space-y-3">
             <div className="text-[11px] text-slate-400 leading-relaxed">
-              開店・閉店作業をチェックして記録します。写真を添付すると、他のスタッフや店長もあとから確認できます（記録は直近14日分を保持します）。
+              開店・閉店作業や曜日ごとのタスクをチェックして記録します。写真を添付すると、他のスタッフや店長もあとから確認できます（記録は直近14日分を保持します）。
             </div>
 
             <div className="flex gap-2">
@@ -3350,6 +3374,31 @@ function PosRegister() {
               </button>
             </div>
 
+            <div>
+              <div className="text-amber-400 text-xs font-bold tracking-widest mb-1.5">曜日タスク（週1回、その曜日に行う作業）</div>
+              <div className="flex gap-1.5 overflow-x-auto pb-1">
+                {WEEKDAY_CHECK_TYPES.map((w) => {
+                  const isToday = new Date().getDay() === w.dayIndex;
+                  return (
+                    <button
+                      key={w.key}
+                      onClick={() => setChecklistType(w.key)}
+                      className={
+                        "shrink-0 w-14 py-2 rounded-lg text-sm font-bold border relative " +
+                        (checklistType === w.key ? "bg-teal-400 text-slate-900 border-teal-500" : "bg-slate-800 border-slate-700 text-slate-300")
+                      }
+                    >
+                      {w.label}
+                      {isToday && (
+                        <span className="absolute -top-1.5 -right-1 bg-rose-500 text-white text-[9px] rounded-full px-1 leading-tight">今日</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {(checklistType === "open" || checklistType === "close") && (
             <div className="bg-slate-800/60 rounded-lg border border-dashed border-teal-700 p-2.5 space-y-1.5">
               <div className="text-teal-300 text-[11px] font-bold tracking-widest">基準額（開店時にレジへ入れる釣銭の目標額）</div>
               <div className="flex gap-2">
@@ -3369,6 +3418,7 @@ function PosRegister() {
                 <div className="text-[11px] text-slate-500">現在の基準額: ¥{tillBaseline.toLocaleString("ja-JP")}</div>
               )}
             </div>
+            )}
 
             <input
               value={checklistStaffDraft}
@@ -3542,13 +3592,13 @@ function PosRegister() {
                 return days.map((d) => (
                   <div key={d} className="bg-slate-800 rounded-lg border border-slate-700 p-2.5 mb-2">
                     <div className="text-xs font-bold text-slate-300 mb-1">{d}</div>
-                    {["open", "close"].map((t) => {
+                    {["open", "close", ...WEEKDAY_CHECK_TYPES.map((w) => w.key)].map((t) => {
                       const entries = checklistLogs.filter((l) => l.date === d && l.type === t);
                       if (entries.length === 0) return null;
                       return (
                         <div key={t} className="mb-1.5">
                           <div className="text-[10px] text-slate-500">
-                            {t === "open" ? "開店" : "閉店"}
+                            {checklistTypeLabel(t)}
                             {entries[0].staff ? `・${entries[0].staff}` : ""}
                           </div>
                           <div className="flex flex-wrap gap-1.5 mt-1">
