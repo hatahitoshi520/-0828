@@ -2,13 +2,19 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <meta name="robots" content="noindex, nofollow">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ライフノート">
 <meta name="theme-color" content="#4f46e5">
+<link rel="manifest" href="life-note.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="life-note-icons/icon-192.png">
+<link rel="apple-touch-icon" href="life-note-icons/apple-touch-icon.png">
 <title>ライフノート</title>
 <script src="https://cdn.tailwindcss.com"></script>
 
@@ -27,6 +33,10 @@
   #boot-error { display:none; color:#b91c1c; background:#fff1f2; font-family:monospace; font-size:12px; white-space:pre-wrap; padding:16px; }
   @keyframes ln-pulse { 0% { box-shadow: 0 0 0 0 rgba(239,68,68,.55); } 100% { box-shadow: 0 0 0 28px rgba(239,68,68,0); } }
   .ln-recording { animation: ln-pulse 1.2s ease-out infinite; }
+  /* ホーム画面から開いた時、ノッチやホームバーに重ならないようにする */
+  .ln-safe-top { padding-top: env(safe-area-inset-top); }
+  .ln-safe-bottom { padding-bottom: calc(1.25rem + env(safe-area-inset-bottom)); }
+  body { overscroll-behavior-y: none; -webkit-tap-highlight-color: transparent; }
 </style>
 </head>
 <body>
@@ -38,7 +48,7 @@
    自動バージョンチェック（Safari等のキャッシュ対策）
    ★修正のたびに、下のAPP_VERSIONの値を必ず変更すること。
    ============================================================ */
-const APP_VERSION = "2026-10-27-01";
+const APP_VERSION = "2026-10-27-02";
 async function suzuCheckForNewVersion() {
   try {
     const res = await fetch(location.pathname + "?_v=" + Date.now(), { cache: "no-store" });
@@ -59,6 +69,32 @@ document.addEventListener("visibilitychange", () => {
 });
 window.addEventListener("focus", suzuCheckForNewVersion);
 suzuCheckForNewVersion();
+
+/* ============================================================
+   アプリ化（PWA）
+   ------------------------------------------------------------
+   サービスワーカーを登録して、ホーム画面に追加できるアプリにする。
+   一度開けば、電波が無い所でも起動して記録できる（Google連携や
+   AI振り分けは、つながった時だけ動く）。
+   ============================================================ */
+if ("serviceWorker" in navigator && location.protocol !== "file:") {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("life-note-sw.js", { scope: "./life-note" }).catch((e) => console.error("SW登録失敗", e));
+  });
+}
+// Android の Chrome などでは「インストール」ダイアログを後から出せるよう保管しておく
+window.lnInstallPrompt = null;
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  window.lnInstallPrompt = e;
+  window.dispatchEvent(new Event("ln-install-available"));
+});
+function isStandaloneApp() {
+  return (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || window.navigator.standalone === true;
+}
+function isIOS() {
+  return /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+}
 
 /* ============================================================
    データの保存先
@@ -765,6 +801,7 @@ function SettingsView({ settings, setSettings, googleStatus, onGoogleConnect, on
   };
   return (
     <div className="space-y-4">
+      <InstallCard />
       <div className="bg-white rounded-xl border p-4 space-y-3">
         <h2 className="font-bold">🔗 Google連携</h2>
         <label className="block text-sm text-slate-600">OAuthクライアントID</label>
@@ -819,6 +856,52 @@ function SettingsView({ settings, setSettings, googleStatus, onGoogleConnect, on
   );
 }
 
+function useInstallState() {
+  const [canPrompt, setCanPrompt] = React.useState(!!window.lnInstallPrompt);
+  const [installed, setInstalled] = React.useState(isStandaloneApp());
+  React.useEffect(() => {
+    const onAvail = () => setCanPrompt(true);
+    const onInstalled = () => { setInstalled(true); setCanPrompt(false); };
+    window.addEventListener("ln-install-available", onAvail);
+    window.addEventListener("appinstalled", onInstalled);
+    return () => { window.removeEventListener("ln-install-available", onAvail); window.removeEventListener("appinstalled", onInstalled); };
+  }, []);
+  const install = async () => {
+    const p = window.lnInstallPrompt;
+    if (!p) return false;
+    p.prompt();
+    await p.userChoice.catch(() => null);
+    window.lnInstallPrompt = null;
+    setCanPrompt(false);
+    return true;
+  };
+  return { canPrompt, installed, install };
+}
+
+function InstallCard() {
+  const { canPrompt, installed, install } = useInstallState();
+  if (installed) {
+    return <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-sm text-emerald-800">📱 アプリとして起動中です</div>;
+  }
+  return (
+    <div className="bg-white rounded-xl border p-4 space-y-3">
+      <h2 className="font-bold">📱 アプリとしてインストール</h2>
+      <p className="text-xs text-slate-500">ホーム画面にアイコンが追加され、普通のアプリと同じように全画面で起動します。電波が無い所でも記録できます。</p>
+      {canPrompt ? (
+        <button onClick={install} className="w-full py-3 rounded-xl bg-indigo-600 text-white font-bold">ホーム画面に追加する</button>
+      ) : isIOS() ? (
+        <ol className="list-decimal ml-5 text-sm space-y-1 text-slate-700">
+          <li>Safariでこのページを開く</li>
+          <li>画面下の共有ボタン（□に↑）をタップ</li>
+          <li>「ホーム画面に追加」を選んで「追加」</li>
+        </ol>
+      ) : (
+        <p className="text-sm text-slate-700">Chromeのメニュー（︙）から「アプリをインストール」または「ホーム画面に追加」を選んでください。</p>
+      )}
+    </div>
+  );
+}
+
 function Toggle({ label, checked, onChange }) {
   return (
     <label className="flex items-center justify-between gap-3 text-sm">
@@ -831,7 +914,7 @@ function Toggle({ label, checked, onChange }) {
 /* ---------------- 音声入力の確認パネル ---------------- */
 function ReviewPanel({ drafts, setDrafts, onCommit, onCancel, busy }) {
   return (
-    <div className="fixed inset-x-0 bottom-0 z-40 bg-white border-t shadow-2xl rounded-t-2xl p-4 max-h-[70vh] overflow-y-auto">
+    <div className="fixed inset-x-0 bottom-0 z-40 bg-white border-t shadow-2xl rounded-t-2xl p-4 ln-safe-bottom max-h-[70vh] overflow-y-auto">
       <div className="max-w-xl mx-auto space-y-3">
         <div className="font-bold text-slate-700">{busy ? "整理しています…" : "この内容で登録しますか？"}</div>
         {drafts.map((d, idx) => (
@@ -1030,6 +1113,16 @@ function LifeNoteApp() {
     else setDrafts(list);
   };
   const speech = useSpeech(handleUtterance);
+  const installState = useInstallState();
+
+  React.useEffect(() => {
+    const url = new URL(location.href);
+    if (url.searchParams.get("mic") === "1") {
+      url.searchParams.delete("mic");
+      history.replaceState(null, "", url.toString());
+      try { speech.start(); } catch (e) { /* ブラウザがタップ無しの録音を許さない場合は何もしない */ }
+    }
+  }, []);
 
   const importGoogleTasks = async () => {
     if (!gConnected) { alert("先にGoogleにログインしてください"); return; }
@@ -1073,14 +1166,22 @@ function LifeNoteApp() {
 
   return (
     <div className="max-w-xl mx-auto pb-56">
-      <header className="sticky top-0 z-30 bg-indigo-600 text-white px-4 py-3 flex items-center justify-between shadow">
-        <h1 className="font-bold text-lg">🎙 ライフノート</h1>
-        <button onClick={() => setTab("settings")} className={`text-xs px-2 py-1 rounded-full ${gConnected ? "bg-emerald-400/90" : "bg-white/20"}`}>
-          {gConnected ? "Google連携中" : "Google未接続"}
-        </button>
+      <div className="sticky top-0 z-30 shadow">
+      <header className="ln-safe-top bg-indigo-600 text-white">
+        <div className="px-4 py-3 flex items-center justify-between gap-2">
+          <h1 className="font-bold text-lg">🎙 ライフノート</h1>
+          <div className="flex gap-2">
+            {!installState.installed && (
+              <button onClick={async () => { if (!(await installState.install())) setTab("settings"); }} className="text-xs px-2 py-1 rounded-full bg-white text-indigo-700 font-bold">📲 インストール</button>
+            )}
+            <button onClick={() => setTab("settings")} className={`text-xs px-2 py-1 rounded-full ${gConnected ? "bg-emerald-400/90" : "bg-white/20"}`}>
+              {gConnected ? "Google連携中" : "Google未接続"}
+            </button>
+          </div>
+        </div>
       </header>
 
-      <nav className="flex overflow-x-auto bg-white border-b sticky top-[52px] z-20">
+      <nav className="flex overflow-x-auto bg-white border-b">
         {tabs.map(([key, icon, label]) => (
           <button key={key} onClick={() => setTab(key)}
             className={`flex-1 min-w-[64px] py-2 text-xs flex flex-col items-center ${tab === key ? "text-indigo-600 border-b-2 border-indigo-600 font-bold" : "text-slate-500"}`}>
@@ -1088,6 +1189,7 @@ function LifeNoteApp() {
           </button>
         ))}
       </nav>
+      </div>
 
       <main className="p-4">
         {tab === "today" && <TodayView items={items} gEvents={gEvents} {...handlers} />}
@@ -1103,7 +1205,7 @@ function LifeNoteApp() {
 
       {/* 音声入力エリア（常に画面下部に表示） */}
       {!drafts && (
-        <div className="fixed inset-x-0 bottom-0 z-30 bg-gradient-to-t from-violet-100 via-violet-50 to-transparent pt-6 pb-5">
+        <div className="fixed inset-x-0 bottom-0 z-30 bg-gradient-to-t from-violet-100 via-violet-50 to-transparent pt-6 ln-safe-bottom">
           <div className="max-w-xl mx-auto px-4 flex flex-col items-center gap-3">
             {speech.listening && (
               <div className="w-full bg-white rounded-xl border p-3 text-slate-700 min-h-[48px] shadow">
@@ -1135,7 +1237,7 @@ function LifeNoteApp() {
           onCommit={() => { const list = drafts; setDrafts(null); addItems(list); }} />
       )}
       {editing && <EditDialog item={editing} onClose={() => setEditing(null)} onSave={(it) => { setEditing(null); updateItem(it); }} />}
-      {toast && <div className="fixed top-16 inset-x-0 z-50 flex justify-center"><div className="bg-slate-800 text-white text-sm px-4 py-2 rounded-full shadow">{toast}</div></div>}
+      {toast && <div className="fixed top-16 mt-[env(safe-area-inset-top)] inset-x-0 z-50 flex justify-center"><div className="bg-slate-800 text-white text-sm px-4 py-2 rounded-full shadow">{toast}</div></div>}
     </div>
   );
 }
