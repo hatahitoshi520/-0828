@@ -1,0 +1,1189 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<meta name="robots" content="noindex, nofollow">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#4f46e5">
+<title>ライフノート</title>
+<script src="https://cdn.tailwindcss.com"></script>
+
+<script crossorigin src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"
+  onerror="this.onerror=null;var s=document.createElement('script');s.src='https://unpkg.com/react@18/umd/react.production.min.js';s.crossOrigin='anonymous';document.head.appendChild(s);"></script>
+<script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"
+  onerror="this.onerror=null;var s=document.createElement('script');s.src='https://unpkg.com/react-dom@18/umd/react-dom.production.min.js';s.crossOrigin='anonymous';document.head.appendChild(s);"></script>
+<script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7/babel.min.js"
+  onerror="this.onerror=null;var s=document.createElement('script');s.src='https://unpkg.com/@babel/standalone@7/babel.min.js';document.head.appendChild(s);"></script>
+<!-- Googleログイン（Google Identity Services） -->
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+
+<style>
+  html, body { margin: 0; padding: 0; background: #f5f3ff; }
+  #root { min-height: 100vh; }
+  #boot-error { display:none; color:#b91c1c; background:#fff1f2; font-family:monospace; font-size:12px; white-space:pre-wrap; padding:16px; }
+  @keyframes ln-pulse { 0% { box-shadow: 0 0 0 0 rgba(239,68,68,.55); } 100% { box-shadow: 0 0 0 28px rgba(239,68,68,0); } }
+  .ln-recording { animation: ln-pulse 1.2s ease-out infinite; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div id="boot-error"></div>
+
+<script>
+/* ============================================================
+   自動バージョンチェック（Safari等のキャッシュ対策）
+   ★修正のたびに、下のAPP_VERSIONの値を必ず変更すること。
+   ============================================================ */
+const APP_VERSION = "2026-10-27-01";
+async function suzuCheckForNewVersion() {
+  try {
+    const res = await fetch(location.pathname + "?_v=" + Date.now(), { cache: "no-store" });
+    const html = await res.text();
+    const m = html.match(/const APP_VERSION = "([^"]+)"/);
+    if (m && m[1] && m[1] !== APP_VERSION) {
+      const url = new URL(location.href);
+      url.searchParams.set("_v", Date.now());
+      location.href = url.toString();
+    }
+  } catch (e) {
+    /* 通信エラーは無視し、次回チェックに任せる */
+  }
+}
+setInterval(suzuCheckForNewVersion, 30000);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") suzuCheckForNewVersion();
+});
+window.addEventListener("focus", suzuCheckForNewVersion);
+suzuCheckForNewVersion();
+
+/* ============================================================
+   データの保存先
+   ------------------------------------------------------------
+   日記や考えごとは個人的な内容なので、お店と共用のSupabaseには
+   保存しない。まずこの端末（localStorage）に保存し、Googleに
+   ログインしている場合は自分のGoogleドライブの「アプリ専用領域」
+   （appDataFolder：本人以外からは見えない）にバックアップする。
+   別の端末でも同じGoogleアカウントでログインすれば同期される。
+   ============================================================ */
+const DATA_STORAGE = "lifenote_data_v1";
+const SETTINGS_STORAGE = "lifenote_settings_v1";
+
+function loadLocal(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch { return fallback; }
+}
+function saveLocal(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* 容量不足などは無視 */ }
+}
+
+/* ============================================================
+   Anthropic（AIによる自動振り分け。任意）
+   ------------------------------------------------------------
+   喫茶すずのPOS・経営会議と同じキー名でlocalStorageに保存する。
+   キーが無くても、ルールベースの振り分けで動作する。
+   ============================================================ */
+const ANTHROPIC_KEY_STORAGE = "suzu_anthropic_api_key";
+function getAnthropicApiKey() {
+  try { return localStorage.getItem(ANTHROPIC_KEY_STORAGE) || ""; } catch { return ""; }
+}
+function setAnthropicApiKeyLocal(key) {
+  try {
+    if (key) localStorage.setItem(ANTHROPIC_KEY_STORAGE, key);
+    else localStorage.removeItem(ANTHROPIC_KEY_STORAGE);
+  } catch { /* ignore */ }
+}
+async function callAnthropicMessages(body) {
+  const key = getAnthropicApiKey();
+  if (!key) {
+    const err = new Error("NO_API_KEY");
+    err.code = "NO_API_KEY";
+    throw err;
+  }
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": key,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`API error ${res.status}: ${text.slice(0, 200)}`);
+  }
+  return res.json();
+}
+function extractText(data) {
+  return (data.content || []).map((b) => (b.type === "text" ? b.text : "")).filter(Boolean).join("\n").trim();
+}
+
+/* ============================================================
+   Google連携（カレンダー・ToDoリスト・ドライブ）
+   ------------------------------------------------------------
+   Google Cloud Console で作成した「OAuthクライアントID（ウェブ
+   アプリケーション）」を設定画面で入力して使う。
+   承認済みのJavaScript生成元に、このページを公開しているURLの
+   オリジン（例: https://xxxx.github.io）を登録しておくこと。
+   ============================================================ */
+const GOOGLE_SCOPES = [
+  "https://www.googleapis.com/auth/calendar.events",
+  "https://www.googleapis.com/auth/tasks",
+  "https://www.googleapis.com/auth/drive.appdata",
+].join(" ");
+const DRIVE_BACKUP_NAME = "lifenote-backup.json";
+
+const google_ = {
+  token: null,
+  expiresAt: 0,
+  client: null,
+  clientId: "",
+  pending: null,
+};
+
+function googleReady() {
+  return typeof google !== "undefined" && google.accounts && google.accounts.oauth2;
+}
+function googleHasToken() {
+  return !!google_.token && Date.now() < google_.expiresAt - 60000;
+}
+function googleInit(clientId) {
+  if (!clientId || !googleReady()) return false;
+  if (google_.client && google_.clientId === clientId) return true;
+  google_.clientId = clientId;
+  google_.client = google.accounts.oauth2.initTokenClient({
+    client_id: clientId,
+    scope: GOOGLE_SCOPES,
+    callback: (resp) => {
+      const p = google_.pending;
+      google_.pending = null;
+      if (resp.error) { p && p.reject(new Error(resp.error)); return; }
+      google_.token = resp.access_token;
+      google_.expiresAt = Date.now() + (Number(resp.expires_in) || 3600) * 1000;
+      p && p.resolve(google_.token);
+    },
+    error_callback: (err) => {
+      const p = google_.pending;
+      google_.pending = null;
+      p && p.reject(new Error(err && err.type ? err.type : "google_auth_error"));
+    },
+  });
+  return true;
+}
+// 2回目以降はポップアップを出さずにトークンを更新できる（prompt: ""）
+function googleSignIn(interactive) {
+  if (!google_.client) return Promise.reject(new Error("Google連携が未設定です"));
+  return new Promise((resolve, reject) => {
+    google_.pending = { resolve, reject };
+    google_.client.requestAccessToken({ prompt: interactive ? "consent" : "" });
+  });
+}
+function googleSignOut() {
+  if (google_.token && googleReady()) google.accounts.oauth2.revoke(google_.token, () => {});
+  google_.token = null;
+  google_.expiresAt = 0;
+}
+async function gfetch(url, opts) {
+  if (!googleHasToken()) await googleSignIn(false);
+  const res = await fetch(url, {
+    ...(opts || {}),
+    headers: { Authorization: `Bearer ${google_.token}`, ...((opts && opts.headers) || {}) },
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Google API ${res.status}: ${text.slice(0, 200)}`);
+  }
+  return res.status === 204 ? null : res.json();
+}
+
+// ---- Googleカレンダー ----
+async function gcalListEvents(timeMin, timeMax) {
+  const q = new URLSearchParams({
+    timeMin: timeMin.toISOString(),
+    timeMax: timeMax.toISOString(),
+    singleEvents: "true",
+    orderBy: "startTime",
+    maxResults: "250",
+  });
+  const data = await gfetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?${q}`);
+  return data.items || [];
+}
+async function gcalUpsertEvent(item) {
+  const body = { summary: item.title, description: item.note || "" };
+  if (item.time) {
+    const start = new Date(`${item.date}T${item.time}:00`);
+    const end = item.endTime
+      ? new Date(`${item.date}T${item.endTime}:00`)
+      : new Date(start.getTime() + 60 * 60000);
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    body.start = { dateTime: start.toISOString(), timeZone: tz };
+    body.end = { dateTime: end.toISOString(), timeZone: tz };
+  } else {
+    body.start = { date: item.date };
+    body.end = { date: addDays(item.date, 1) };
+  }
+  if (item.gcalId) {
+    return gfetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${item.gcalId}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+  }
+  return gfetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+}
+async function gcalDeleteEvent(gcalId) {
+  return gfetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${gcalId}`, { method: "DELETE" });
+}
+
+// ---- Google ToDoリスト（Tasks） ----
+async function gtasksUpsert(item) {
+  const body = { title: item.title, notes: item.note || "", status: item.done ? "completed" : "needsAction" };
+  if (item.date) body.due = `${item.date}T00:00:00.000Z`;
+  if (item.gtaskId) {
+    return gfetch(`https://tasks.googleapis.com/tasks/v1/lists/@default/tasks/${item.gtaskId}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+  }
+  return gfetch("https://tasks.googleapis.com/tasks/v1/lists/@default/tasks", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+}
+async function gtasksDelete(gtaskId) {
+  return gfetch(`https://tasks.googleapis.com/tasks/v1/lists/@default/tasks/${gtaskId}`, { method: "DELETE" });
+}
+async function gtasksListOpen() {
+  const q = new URLSearchParams({ showCompleted: "false", maxResults: "100" });
+  const data = await gfetch(`https://tasks.googleapis.com/tasks/v1/lists/@default/tasks?${q}`);
+  return data.items || [];
+}
+
+// ---- Googleドライブ（アプリ専用領域へのバックアップ） ----
+async function gdriveFindBackup() {
+  const q = new URLSearchParams({
+    spaces: "appDataFolder",
+    q: `name='${DRIVE_BACKUP_NAME}'`,
+    fields: "files(id,modifiedTime)",
+  });
+  const data = await gfetch(`https://www.googleapis.com/drive/v3/files?${q}`);
+  return (data.files || [])[0] || null;
+}
+async function gdriveLoadBackup() {
+  const file = await gdriveFindBackup();
+  if (!file) return null;
+  return gfetch(`https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`);
+}
+async function gdriveSaveBackup(dataObj) {
+  const file = await gdriveFindBackup();
+  const metadata = file ? {} : { name: DRIVE_BACKUP_NAME, parents: ["appDataFolder"] };
+  const boundary = "lifenote" + Date.now();
+  const body =
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
+    `--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(dataObj)}\r\n--${boundary}--`;
+  const url = file
+    ? `https://www.googleapis.com/upload/drive/v3/files/${file.id}?uploadType=multipart`
+    : "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart";
+  return gfetch(url, {
+    method: file ? "PATCH" : "POST",
+    headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
+    body,
+  });
+}
+
+/* ============================================================
+   日付ユーティリティ（ローカル時刻の YYYY-MM-DD で扱う）
+   ============================================================ */
+function pad2(n) { return String(n).padStart(2, "0"); }
+function toYmd(d) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }
+function todayYmd() { return toYmd(new Date()); }
+function parseYmd(s) { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); }
+function addDays(ymd, n) { const d = parseYmd(ymd); d.setDate(d.getDate() + n); return toYmd(d); }
+const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
+function formatJpDate(ymd) {
+  const d = parseYmd(ymd);
+  return `${d.getMonth() + 1}/${d.getDate()}(${WEEKDAYS[d.getDay()]})`;
+}
+
+/* ============================================================
+   音声テキストの自動振り分け（ルールベース）
+   ------------------------------------------------------------
+   話した内容から「日記 / ToDo / 考えたこと / 予定」を判定し、
+   日付・時刻も読み取る。AIキーがあればAIで判定する（後述）。
+   ============================================================ */
+const KANJI_NUM = { "〇": 0, "零": 0, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9 };
+// 「十五」「二十三」などの漢数字を算用数字に直す（音声認識が漢数字で返すことがあるため）
+function normalizeNumbers(text) {
+  let t = text.replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0));
+  t = t.replace(/[〇零一二三四五六七八九十]+/g, (s) => {
+    if (!/^[〇零一二三四五六七八九]?十?[〇零一二三四五六七八九]?$/.test(s) || s.length === 0) return s;
+    if (s.includes("十")) {
+      const [a, b] = s.split("十");
+      return String((a ? KANJI_NUM[a] : 1) * 10 + (b ? KANJI_NUM[b] : 0));
+    }
+    return s.length === 1 ? String(KANJI_NUM[s]) : s;
+  });
+  return t;
+}
+
+function parseDateFromText(text, baseYmd) {
+  const base = parseYmd(baseYmd);
+  let date = null;
+  const rel = [["一昨日", -2], ["おととい", -2], ["昨日", -1], ["きのう", -1], ["今日", 0], ["きょう", 0], ["本日", 0],
+    ["明後日", 2], ["あさって", 2], ["明日", 1], ["あした", 1], ["あす", 1], ["しあさって", 3]];
+  for (const [w, n] of rel) {
+    if (text.includes(w)) { date = addDays(baseYmd, n); break; }
+  }
+  // 漢数字の変換は「一昨日」などの判定の後に行う
+  const t = normalizeNumbers(text);
+  let m;
+  if ((m = t.match(/(\d{1,2})\s*[月\/]\s*(\d{1,2})\s*日?/))) {
+    const mo = Number(m[1]), da = Number(m[2]);
+    if (mo >= 1 && mo <= 12 && da >= 1 && da <= 31) {
+      let y = base.getFullYear();
+      // 過去の月日なら来年とみなす（2か月以上前の場合のみ）
+      const cand = new Date(y, mo - 1, da);
+      if (cand < new Date(base.getFullYear(), base.getMonth() - 2, 1)) y += 1;
+      date = toYmd(new Date(y, mo - 1, da));
+    }
+  } else if ((m = t.match(/(?:^|[^\d月\/])(\d{1,2})日/)) && !/\d+日(間|前|後)/.test(t)) {
+    const da = Number(m[1]);
+    if (da >= 1 && da <= 31) {
+      const cand = new Date(base.getFullYear(), base.getMonth(), da);
+      if (cand < base) cand.setMonth(cand.getMonth() + 1);
+      date = toYmd(cand);
+    }
+  }
+  if ((m = t.match(/(来週|再来週|今週)?の?([日月火水木金土])曜/))) {
+    const target = WEEKDAYS.indexOf(m[2]);
+    const cur = base.getDay();
+    let diff;
+    if (m[1] === "来週" || m[1] === "再来週") {
+      // 週の始まりを月曜として、次の週の該当曜日
+      const toNextMon = ((8 - cur) % 7) || 7;
+      diff = toNextMon + ((target + 6) % 7) + (m[1] === "再来週" ? 7 : 0);
+    } else {
+      diff = (target - cur + 7) % 7;
+    }
+    date = addDays(baseYmd, diff);
+  } else if (/来週/.test(t) && !date) {
+    date = addDays(baseYmd, 7);
+  }
+
+  let time = null;
+  if ((m = t.match(/(午前|午後|朝|夜|夕方)?\s*(\d{1,2})\s*(?:時(?!間)|:|：)\s*(半|(\d{1,2})\s*分?)?/))) {
+    let h = Number(m[2]);
+    const min = m[3] === "半" ? 30 : m[4] ? Number(m[4]) : 0;
+    if ((m[1] === "午後" || m[1] === "夜" || m[1] === "夕方") && h < 12) h += 12;
+    // 「3時」だけの場合、1〜6時は午後とみなす（予定としてはその方が自然）
+    if (!m[1] && h >= 1 && h <= 6) h += 12;
+    if (h <= 23 && min <= 59) time = `${pad2(h)}:${pad2(min)}`;
+  } else if (/正午|お昼/.test(t)) {
+    time = "12:00";
+  }
+  return { date, time };
+}
+
+const TODO_WORDS = /(しなきゃ|しないと|しなければ|やらなきゃ|やらないと|忘れずに|買う|買わ|買いに|やること|タスク|todo|ToDo|TODO|連絡する|電話する|送る|出す|提出|返信|予約する|払う|支払|片付け|準備する|までに)/;
+const SCHEDULE_WORDS = /(予定|約束|会議|ミーティング|打ち合わせ|面談|アポ|待ち合わせ|病院|歯医者|美容院|飲み会|ランチ|ディナー|イベント|集合|出張|旅行|誕生日|記念日|会う|行く)/;
+const THOUGHT_WORDS = /(思った|思う|考え|アイデア|アイディア|ひらめ|気づ|気付|メモ|かもしれない|なのでは|べきだ|たい$|したい|気がする|って何|とは)/;
+const DIARY_WORDS = /(今日は|今日の|楽しかった|嬉しかった|疲れた|悲しかった|だった|でした|ました|食べた|行った|会った|見た|過ごした|した。?$|った。?$)/;
+const EXPLICIT_PREFIX = [
+  [/^(日記|にっき)[、。:：\s]*/, "diary"],
+  [/^(やること|タスク|todo|ToDo|TODO|トゥードゥー)[、。:：\s]*/, "todo"],
+  [/^(メモ|考え|アイデア|アイディア|思いつき)[、。:：\s]*/, "thought"],
+  [/^(予定|スケジュール)[、。:：\s]*/, "schedule"],
+];
+
+function classifyByRules(rawText, baseYmd) {
+  let text = rawText.trim();
+  let type = null;
+  for (const [re, tp] of EXPLICIT_PREFIX) {
+    if (re.test(text)) { type = tp; text = text.replace(re, ""); break; }
+  }
+  const { date, time } = parseDateFromText(text, baseYmd);
+  if (!type) {
+    const isFuture = date && date > baseYmd;
+    if (SCHEDULE_WORDS.test(text) && (time || isFuture)) type = "schedule";
+    else if (time && isFuture) type = "schedule";
+    else if (TODO_WORDS.test(text)) type = "todo";
+    else if (THOUGHT_WORDS.test(text)) type = "thought";
+    else if (DIARY_WORDS.test(text)) type = "diary";
+    else type = text.length > 40 ? "diary" : "thought";
+  }
+  const item = { type, text, date: date || baseYmd, time: null, title: text };
+  if (type === "schedule" || type === "todo") {
+    item.time = type === "schedule" ? time : null;
+    item.title = makeShortTitle(text);
+    if (type === "todo" && !date) item.date = null;
+  }
+  if (type === "diary") item.date = date && date <= baseYmd ? date : baseYmd;
+  return item;
+}
+// 予定・ToDoのタイトルから日時の言い回しを取り除いて短くする
+function makeShortTitle(text) {
+  let t = text
+    .replace(/(一昨日|おととい|昨日|きのう|今日|きょう|本日|明後日|あさって|明日|あした|あす|しあさって)(の|は|に)?/g, "")
+    .replace(/(来週|再来週|今週)?の?[日月火水木金土]曜日?(の|は|に)?/g, "")
+    .replace(/[0-9０-９一二三四五六七八九十]{1,3}\s*[月\/]\s*[0-9０-９一二三四五六七八九十]{1,3}\s*日?(の|は|に)?/g, "")
+    .replace(/(午前|午後|朝|夜|夕方)?\s*[0-9０-９一二三四五六七八九十]{1,3}\s*(時|:|：)\s*(半|[0-9０-９一二三四五六七八九十]{1,3}\s*分?)?(から|に|の|より)?/g, "")
+    .replace(/(しなきゃ|しないと|しなければ|やらなきゃ|やらないと)(いけない|ならない)?/g, "する")
+    .replace(/[。、\s]+$/g, "")
+    .replace(/^[、。\s]+/, "")
+    .replace(/^まで(に)?/, "")
+    .trim();
+  return t || text;
+}
+
+/* ============================================================
+   AIによる振り分け（APIキーがある場合のみ）
+   ------------------------------------------------------------
+   一度の発話に複数の内容（例:「明日10時に歯医者。あと牛乳買う」）
+   が含まれていても、AIなら複数の項目に分けて登録できる。
+   ============================================================ */
+async function classifyByAI(rawText, baseYmd) {
+  const d = parseYmd(baseYmd);
+  const system =
+    "あなたは音声メモを整理するアシスタントです。ユーザーの発話を、次の4種類の項目に分類して JSON 配列だけを返してください。\n" +
+    "- diary: 今日あった出来事や感情（日記）\n- todo: やるべきこと\n- thought: 考えたこと・アイデア・気づき\n- schedule: 日時が決まった予定\n" +
+    "1つの発話に複数の内容があれば複数の項目に分けてください。\n" +
+    "各項目の形式: {\"type\":\"diary|todo|thought|schedule\",\"title\":\"短いタイトル（予定・ToDoは日時表現を除く）\",\"text\":\"本文（話し言葉を自然な文に整える）\",\"date\":\"YYYY-MM-DD または null\",\"time\":\"HH:MM または null\",\"endTime\":\"HH:MM または null\"}\n" +
+    `今日は ${baseYmd}（${WEEKDAYS[d.getDay()]}曜日）です。日記の date は今日、期限のないToDoの date は null にしてください。JSON以外は出力しないでください。`;
+  const data = await callAnthropicMessages({
+    model: "claude-haiku-5-5",
+    max_tokens: 1024,
+    system,
+    messages: [{ role: "user", content: rawText }],
+  });
+  const text = extractText(data);
+  const json = text.slice(text.indexOf("["), text.lastIndexOf("]") + 1);
+  const arr = JSON.parse(json);
+  return arr
+    .filter((x) => x && ["diary", "todo", "thought", "schedule"].includes(x.type))
+    .map((x) => ({
+      type: x.type,
+      title: x.title || x.text || "",
+      text: x.text || x.title || "",
+      date: x.date || (x.type === "todo" ? null : baseYmd),
+      time: x.time || null,
+      endTime: x.endTime || null,
+    }));
+}
+
+// Googleカレンダーの予定の日付（YYYY-MM-DD、端末の時刻で）
+function gEventYmd(ev) {
+  return ev.start.date || toYmd(new Date(ev.start.dateTime));
+}
+
+const TYPE_META = {
+  diary:    { label: "日記",       icon: "📔", color: "bg-amber-100 text-amber-800 border-amber-200" },
+  todo:     { label: "ToDo",       icon: "✅", color: "bg-emerald-100 text-emerald-800 border-emerald-200" },
+  thought:  { label: "考えたこと", icon: "💡", color: "bg-sky-100 text-sky-800 border-sky-200" },
+  schedule: { label: "予定",       icon: "📅", color: "bg-rose-100 text-rose-800 border-rose-200" },
+};
+</script>
+
+<script id="app-source" type="text/plain">
+
+const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+function newId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+
+/* ---------------- 音声入力フック ---------------- */
+function useSpeech(onFinal) {
+  const [listening, setListening] = React.useState(false);
+  const [interim, setInterim] = React.useState("");
+  const recRef = React.useRef(null);
+  const bufferRef = React.useRef("");
+  const onFinalRef = React.useRef(onFinal);
+  onFinalRef.current = onFinal;
+
+  const start = React.useCallback(() => {
+    if (!SpeechRecognitionCtor) return;
+    const rec = new SpeechRecognitionCtor();
+    rec.lang = "ja-JP";
+    rec.interimResults = true;
+    rec.continuous = true;
+    bufferRef.current = "";
+    rec.onresult = (e) => {
+      let interimText = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const r = e.results[i];
+        if (r.isFinal) bufferRef.current += r[0].transcript;
+        else interimText += r[0].transcript;
+      }
+      setInterim(bufferRef.current + interimText);
+    };
+    rec.onerror = (e) => {
+      if (e.error === "not-allowed") alert("マイクの使用が許可されていません。ブラウザの設定を確認してください。");
+    };
+    rec.onend = () => {
+      setListening(false);
+      const text = bufferRef.current.trim();
+      setInterim("");
+      bufferRef.current = "";
+      recRef.current = null;
+      if (text) onFinalRef.current(text);
+    };
+    recRef.current = rec;
+    rec.start();
+    setListening(true);
+  }, []);
+
+  const stop = React.useCallback(() => {
+    if (recRef.current) recRef.current.stop();
+  }, []);
+
+  return { supported: !!SpeechRecognitionCtor, listening, interim, start, stop };
+}
+
+/* ---------------- 共通パーツ ---------------- */
+function TypeBadge({ type }) {
+  const m = TYPE_META[type];
+  return <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border ${m.color}`}>{m.icon} {m.label}</span>;
+}
+
+function ItemCard({ item, onToggle, onEdit, onDelete }) {
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-sm">
+      <div className="flex items-start gap-2">
+        {item.type === "todo" && (
+          <button onClick={() => onToggle(item)}
+            className={`mt-0.5 w-6 h-6 shrink-0 rounded-md border-2 flex items-center justify-center ${item.done ? "bg-emerald-500 border-emerald-500 text-white" : "border-slate-300"}`}>
+            {item.done ? "✓" : ""}
+          </button>
+        )}
+        <div className="flex-1 min-w-0" onClick={() => onEdit(item)}>
+          <div className="flex flex-wrap items-center gap-2 mb-1">
+            <TypeBadge type={item.type} />
+            {item.date && <span className="text-xs text-slate-500">{formatJpDate(item.date)}{item.time ? ` ${item.time}` : ""}{item.endTime ? `〜${item.endTime}` : ""}</span>}
+            {(item.gcalId || item.gtaskId) && <span className="text-xs text-indigo-500">● Google</span>}
+          </div>
+          <div className={`text-slate-800 whitespace-pre-wrap break-words ${item.done ? "line-through text-slate-400" : ""}`}>
+            {item.type === "schedule" || item.type === "todo" ? item.title : item.text}
+          </div>
+        </div>
+        <button onClick={() => onDelete(item)} className="text-slate-300 hover:text-rose-500 text-lg leading-none px-1">×</button>
+      </div>
+    </div>
+  );
+}
+
+function EditDialog({ item, onSave, onClose }) {
+  const [draft, setDraft] = React.useState(item);
+  const set = (k, v) => setDraft((d) => ({ ...d, [k]: v }));
+  const isEvent = draft.type === "schedule" || draft.type === "todo";
+  return (
+    <div className="fixed inset-0 bg-black/40 z-50 flex items-end sm:items-center justify-center" onClick={onClose}>
+      <div className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl p-4 space-y-3" onClick={(e) => e.stopPropagation()}>
+        <div className="flex gap-1 flex-wrap">
+          {Object.keys(TYPE_META).map((tp) => (
+            <button key={tp} onClick={() => set("type", tp)}
+              className={`px-3 py-1 rounded-full text-sm border ${draft.type === tp ? TYPE_META[tp].color : "border-slate-200 text-slate-500"}`}>
+              {TYPE_META[tp].icon} {TYPE_META[tp].label}
+            </button>
+          ))}
+        </div>
+        {isEvent && (
+          <input className="w-full border rounded-lg px-3 py-2" placeholder="タイトル" value={draft.title || ""} onChange={(e) => set("title", e.target.value)} />
+        )}
+        <textarea className="w-full border rounded-lg px-3 py-2 h-28" placeholder="内容" value={draft.text || ""} onChange={(e) => set("text", e.target.value)} />
+        <div className="flex gap-2 items-center flex-wrap">
+          <input type="date" className="border rounded-lg px-2 py-1" value={draft.date || ""} onChange={(e) => set("date", e.target.value || null)} />
+          {draft.type === "schedule" && (
+            <>
+              <input type="time" className="border rounded-lg px-2 py-1" value={draft.time || ""} onChange={(e) => set("time", e.target.value || null)} />
+              <span className="text-slate-400">〜</span>
+              <input type="time" className="border rounded-lg px-2 py-1" value={draft.endTime || ""} onChange={(e) => set("endTime", e.target.value || null)} />
+            </>
+          )}
+        </div>
+        <div className="flex gap-2 pt-1">
+          <button onClick={onClose} className="flex-1 py-2 rounded-lg border">キャンセル</button>
+          <button onClick={() => onSave({ ...draft, title: isEvent ? (draft.title || draft.text) : draft.text })}
+            className="flex-1 py-2 rounded-lg bg-indigo-600 text-white font-bold">保存</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- 各タブ ---------------- */
+function TodayView({ items, gEvents, ...handlers }) {
+  const today = todayYmd();
+  const schedules = items.filter((i) => i.type === "schedule" && i.date === today)
+    .sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+  const ownIds = new Set(items.map((i) => i.gcalId).filter(Boolean));
+  const externalEvents = gEvents.filter((e) => !ownIds.has(e.id) && gEventYmd(e) === today);
+  const todos = items.filter((i) => i.type === "todo" && !i.done && (!i.date || i.date <= today))
+    .sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999"));
+  const logs = items.filter((i) => (i.type === "diary" || i.type === "thought") && i.date === today);
+  return (
+    <div className="space-y-5">
+      <Section title={`📅 今日の予定（${formatJpDate(today)}）`} empty="予定はありません" count={schedules.length + externalEvents.length}>
+        {externalEvents.map((e) => <GoogleEventCard key={e.id} ev={e} />)}
+        {schedules.map((i) => <ItemCard key={i.id} item={i} {...handlers} />)}
+      </Section>
+      <Section title="✅ やること（期限が今日まで・期限なし）" empty="やることはありません" count={todos.length}>
+        {todos.map((i) => <ItemCard key={i.id} item={i} {...handlers} />)}
+      </Section>
+      <Section title="📔 今日の記録" empty="まだ記録がありません。マイクで話しかけてください" count={logs.length}>
+        {logs.map((i) => <ItemCard key={i.id} item={i} {...handlers} />)}
+      </Section>
+    </div>
+  );
+}
+
+function GoogleEventCard({ ev }) {
+  const s = ev.start.dateTime ? new Date(ev.start.dateTime) : null;
+  const e = ev.end && ev.end.dateTime ? new Date(ev.end.dateTime) : null;
+  return (
+    <a href={ev.htmlLink} target="_blank" rel="noreferrer" className="block bg-indigo-50 rounded-xl border border-indigo-100 p-3">
+      <div className="text-xs text-indigo-600 mb-1">Googleカレンダー {s ? `${pad2(s.getHours())}:${pad2(s.getMinutes())}${e ? `〜${pad2(e.getHours())}:${pad2(e.getMinutes())}` : ""}` : "終日"}</div>
+      <div className="text-slate-800">{ev.summary || "（タイトルなし）"}</div>
+    </a>
+  );
+}
+
+function Section({ title, empty, count, children }) {
+  return (
+    <div>
+      <h2 className="text-sm font-bold text-slate-600 mb-2">{title}</h2>
+      <div className="space-y-2">
+        {count ? children : <div className="text-sm text-slate-400 bg-white/60 rounded-xl p-3 border border-dashed">{empty}</div>}
+      </div>
+    </div>
+  );
+}
+
+function ListView({ items, type, ...handlers }) {
+  const [showDone, setShowDone] = React.useState(false);
+  const [query, setQuery] = React.useState("");
+  let list = items.filter((i) => i.type === type);
+  if (type === "todo" && !showDone) list = list.filter((i) => !i.done);
+  if (query) list = list.filter((i) => (i.text + " " + (i.title || "")).includes(query));
+  if (type === "todo") list.sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999"));
+  else list.sort((a, b) => ((b.date || "") + b.createdAt).localeCompare((a.date || "") + a.createdAt));
+
+  // 日記・考えたことは日付ごとにまとめて表示する
+  const groups = [];
+  if (type === "diary" || type === "thought") {
+    for (const i of list) {
+      const g = groups[groups.length - 1];
+      if (g && g.date === i.date) g.items.push(i);
+      else groups.push({ date: i.date, items: [i] });
+    }
+  }
+  return (
+    <div className="space-y-3">
+      <div className="flex gap-2">
+        <input className="flex-1 border rounded-lg px-3 py-2 bg-white" placeholder="🔍 検索" value={query} onChange={(e) => setQuery(e.target.value)} />
+        {type === "todo" && (
+          <label className="flex items-center gap-1 text-sm text-slate-600">
+            <input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} /> 完了も表示
+          </label>
+        )}
+      </div>
+      {list.length === 0 && <div className="text-sm text-slate-400 bg-white/60 rounded-xl p-3 border border-dashed">まだありません</div>}
+      {groups.length > 0
+        ? groups.map((g) => (
+            <div key={g.date}>
+              <div className="text-xs font-bold text-slate-500 mb-1">{formatJpDate(g.date)}</div>
+              <div className="space-y-2">{g.items.map((i) => <ItemCard key={i.id} item={i} {...handlers} />)}</div>
+            </div>
+          ))
+        : <div className="space-y-2">{list.map((i) => <ItemCard key={i.id} item={i} {...handlers} />)}</div>}
+    </div>
+  );
+}
+
+function CalendarView({ items, gEvents, ...handlers }) {
+  const [month, setMonth] = React.useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
+  const [selected, setSelected] = React.useState(todayYmd());
+  const first = new Date(month.getFullYear(), month.getMonth(), 1);
+  const cells = [];
+  for (let i = 0; i < first.getDay(); i++) cells.push(null);
+  const days = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
+  for (let d = 1; d <= days; d++) cells.push(toYmd(new Date(month.getFullYear(), month.getMonth(), d)));
+
+  const ownIds = new Set(items.map((i) => i.gcalId).filter(Boolean));
+  const extEvents = gEvents.filter((e) => !ownIds.has(e.id));
+  const marks = (ymd) => {
+    const s = new Set(items.filter((i) => i.date === ymd).map((i) => i.type));
+    if (extEvents.some((e) => gEventYmd(e) === ymd)) s.add("schedule");
+    return [...s];
+  };
+  const dayItems = items.filter((i) => i.date === selected)
+    .sort((a, b) => (a.time || "99").localeCompare(b.time || "99"));
+  const dayExt = extEvents.filter((e) => gEventYmd(e) === selected);
+  const dotColor = { diary: "bg-amber-400", todo: "bg-emerald-400", thought: "bg-sky-400", schedule: "bg-rose-400" };
+
+  return (
+    <div className="space-y-3">
+      <div className="bg-white rounded-xl border p-3">
+        <div className="flex items-center justify-between mb-2">
+          <button className="px-3 py-1" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))}>◀</button>
+          <div className="font-bold">{month.getFullYear()}年{month.getMonth() + 1}月</div>
+          <button className="px-3 py-1" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))}>▶</button>
+        </div>
+        <div className="grid grid-cols-7 text-center text-xs text-slate-500 mb-1">
+          {WEEKDAYS.map((w, i) => <div key={w} className={i === 0 ? "text-rose-500" : i === 6 ? "text-sky-500" : ""}>{w}</div>)}
+        </div>
+        <div className="grid grid-cols-7 gap-1">
+          {cells.map((ymd, idx) => ymd ? (
+            <button key={ymd} onClick={() => setSelected(ymd)}
+              className={`h-12 rounded-lg flex flex-col items-center justify-start pt-1 text-sm ${ymd === selected ? "bg-indigo-600 text-white" : ymd === todayYmd() ? "bg-indigo-50 text-indigo-700 font-bold" : ""}`}>
+              {Number(ymd.slice(8))}
+              <div className="flex gap-0.5 mt-1">{marks(ymd).map((tp) => <span key={tp} className={`w-1.5 h-1.5 rounded-full ${dotColor[tp]}`} />)}</div>
+            </button>
+          ) : <div key={"e" + idx} />)}
+        </div>
+      </div>
+      <h2 className="text-sm font-bold text-slate-600">{formatJpDate(selected)}</h2>
+      <div className="space-y-2">
+        {dayExt.map((e) => <GoogleEventCard key={e.id} ev={e} />)}
+        {dayItems.map((i) => <ItemCard key={i.id} item={i} {...handlers} />)}
+        {dayExt.length + dayItems.length === 0 && <div className="text-sm text-slate-400 bg-white/60 rounded-xl p-3 border border-dashed">この日の記録はありません</div>}
+      </div>
+    </div>
+  );
+}
+
+function SettingsView({ settings, setSettings, googleStatus, onGoogleConnect, onGoogleDisconnect, onBackup, onRestore, onImportTasks, items }) {
+  const [apiKey, setApiKey] = React.useState(getAnthropicApiKey());
+  const exportJson = () => {
+    const blob = new Blob([JSON.stringify({ items }, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `lifenote-${todayYmd()}.json`;
+    a.click();
+  };
+  return (
+    <div className="space-y-4">
+      <div className="bg-white rounded-xl border p-4 space-y-3">
+        <h2 className="font-bold">🔗 Google連携</h2>
+        <label className="block text-sm text-slate-600">OAuthクライアントID</label>
+        <input className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="xxxxx.apps.googleusercontent.com"
+          value={settings.googleClientId} onChange={(e) => setSettings({ ...settings, googleClientId: e.target.value.trim() })} />
+        <div className="text-sm">状態: {googleStatus}</div>
+        <div className="flex gap-2 flex-wrap">
+          <button onClick={onGoogleConnect} className="px-3 py-2 rounded-lg bg-indigo-600 text-white text-sm">Googleにログイン</button>
+          <button onClick={onGoogleDisconnect} className="px-3 py-2 rounded-lg border text-sm">ログアウト</button>
+        </div>
+        <div className="space-y-2 pt-2 border-t">
+          <Toggle label="予定をGoogleカレンダーに自動登録" checked={settings.syncCalendar} onChange={(v) => setSettings({ ...settings, syncCalendar: v })} />
+          <Toggle label="ToDoをGoogle ToDoリストに自動登録" checked={settings.syncTasks} onChange={(v) => setSettings({ ...settings, syncTasks: v })} />
+          <Toggle label="変更をGoogleドライブに自動バックアップ" checked={settings.autoBackup} onChange={(v) => setSettings({ ...settings, autoBackup: v })} />
+        </div>
+        <div className="flex gap-2 flex-wrap pt-2 border-t">
+          <button onClick={onBackup} className="px-3 py-2 rounded-lg border text-sm">☁️ 今すぐバックアップ</button>
+          <button onClick={onRestore} className="px-3 py-2 rounded-lg border text-sm">⬇️ ドライブから復元</button>
+          <button onClick={onImportTasks} className="px-3 py-2 rounded-lg border text-sm">📥 Google ToDoを取り込む</button>
+        </div>
+        <details className="text-xs text-slate-500">
+          <summary className="cursor-pointer">クライアントIDの取得方法</summary>
+          <ol className="list-decimal ml-5 mt-2 space-y-1">
+            <li>Google Cloud Console（console.cloud.google.com）でプロジェクトを作成</li>
+            <li>「APIとサービス」→「ライブラリ」で Google Calendar API / Google Tasks API / Google Drive API を有効化</li>
+            <li>「OAuth同意画面」を作成し、テストユーザーに自分のGoogleアカウントを追加</li>
+            <li>「認証情報」→「OAuthクライアントID」→種類「ウェブアプリケーション」を作成</li>
+            <li>「承認済みのJavaScript生成元」に <code>{location.origin}</code> を追加</li>
+            <li>表示されたクライアントIDを上の欄に貼り付け</li>
+          </ol>
+        </details>
+      </div>
+
+      <div className="bg-white rounded-xl border p-4 space-y-3">
+        <h2 className="font-bold">🤖 AI自動振り分け（任意）</h2>
+        <p className="text-xs text-slate-500">AnthropicのAPIキーを入れると、1回の発話に複数の内容があっても自動で分けて登録します。未設定でもキーワードで振り分けます。</p>
+        <input type="password" className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="sk-ant-..." value={apiKey} onChange={(e) => setApiKey(e.target.value.trim())} />
+        <button onClick={() => { setAnthropicApiKeyLocal(apiKey); alert("保存しました"); }} className="px-3 py-2 rounded-lg border text-sm">キーを保存</button>
+      </div>
+
+      <div className="bg-white rounded-xl border p-4 space-y-3">
+        <h2 className="font-bold">🎙 音声入力</h2>
+        <Toggle label="話し終えたら確認せずにすぐ登録する" checked={settings.autoCommit} onChange={(v) => setSettings({ ...settings, autoCommit: v })} />
+        <Toggle label="登録内容を読み上げる" checked={settings.speakBack} onChange={(v) => setSettings({ ...settings, speakBack: v })} />
+        <p className="text-xs text-slate-500">ヒント: 「日記、」「やること、」「メモ、」「予定、」で話し始めると、その種類で確実に登録されます。</p>
+      </div>
+
+      <div className="bg-white rounded-xl border p-4">
+        <button onClick={exportJson} className="px-3 py-2 rounded-lg border text-sm">💾 全データをファイルに書き出す</button>
+      </div>
+    </div>
+  );
+}
+
+function Toggle({ label, checked, onChange }) {
+  return (
+    <label className="flex items-center justify-between gap-3 text-sm">
+      <span>{label}</span>
+      <input type="checkbox" className="w-5 h-5" checked={!!checked} onChange={(e) => onChange(e.target.checked)} />
+    </label>
+  );
+}
+
+/* ---------------- 音声入力の確認パネル ---------------- */
+function ReviewPanel({ drafts, setDrafts, onCommit, onCancel, busy }) {
+  return (
+    <div className="fixed inset-x-0 bottom-0 z-40 bg-white border-t shadow-2xl rounded-t-2xl p-4 max-h-[70vh] overflow-y-auto">
+      <div className="max-w-xl mx-auto space-y-3">
+        <div className="font-bold text-slate-700">{busy ? "整理しています…" : "この内容で登録しますか？"}</div>
+        {drafts.map((d, idx) => (
+          <div key={idx} className="border rounded-xl p-3 space-y-2">
+            <div className="flex gap-1 flex-wrap">
+              {Object.keys(TYPE_META).map((tp) => (
+                <button key={tp} onClick={() => setDrafts(drafts.map((x, j) => j === idx ? { ...x, type: tp } : x))}
+                  className={`px-2 py-0.5 rounded-full text-xs border ${d.type === tp ? TYPE_META[tp].color : "border-slate-200 text-slate-400"}`}>
+                  {TYPE_META[tp].icon} {TYPE_META[tp].label}
+                </button>
+              ))}
+              <button className="ml-auto text-slate-300 hover:text-rose-500" onClick={() => setDrafts(drafts.filter((_, j) => j !== idx))}>×</button>
+            </div>
+            <textarea className="w-full border rounded-lg px-2 py-1 text-sm" rows={2} value={d.type === "schedule" || d.type === "todo" ? d.title : d.text}
+              onChange={(e) => setDrafts(drafts.map((x, j) => j === idx ? (d.type === "schedule" || d.type === "todo" ? { ...x, title: e.target.value } : { ...x, text: e.target.value }) : x))} />
+            <div className="flex gap-2 text-sm">
+              <input type="date" className="border rounded px-2 py-1" value={d.date || ""} onChange={(e) => setDrafts(drafts.map((x, j) => j === idx ? { ...x, date: e.target.value || null } : x))} />
+              {d.type === "schedule" && <input type="time" className="border rounded px-2 py-1" value={d.time || ""} onChange={(e) => setDrafts(drafts.map((x, j) => j === idx ? { ...x, time: e.target.value || null } : x))} />}
+            </div>
+          </div>
+        ))}
+        <div className="flex gap-2">
+          <button onClick={onCancel} className="flex-1 py-3 rounded-xl border">やめる</button>
+          <button disabled={busy || drafts.length === 0} onClick={onCommit} className="flex-1 py-3 rounded-xl bg-indigo-600 text-white font-bold disabled:opacity-40">登録する</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- アプリ本体 ---------------- */
+const DEFAULT_SETTINGS = {
+  googleClientId: "",
+  syncCalendar: true,
+  syncTasks: true,
+  autoBackup: true,
+  autoCommit: false,
+  speakBack: false,
+};
+
+function LifeNoteApp() {
+  const [items, setItems] = React.useState(() => loadLocal(DATA_STORAGE, { items: [] }).items || []);
+  const [settings, setSettingsState] = React.useState(() => ({ ...DEFAULT_SETTINGS, ...loadLocal(SETTINGS_STORAGE, {}) }));
+  const [tab, setTab] = React.useState("today");
+  const [editing, setEditing] = React.useState(null);
+  const [drafts, setDrafts] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+  const [typed, setTyped] = React.useState("");
+  const [gConnected, setGConnected] = React.useState(false);
+  const [gEvents, setGEvents] = React.useState([]);
+  const [toast, setToast] = React.useState("");
+  const itemsRef = React.useRef(items);
+  itemsRef.current = items;
+
+  const setSettings = (s) => { setSettingsState(s); saveLocal(SETTINGS_STORAGE, s); };
+  const notify = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2500); };
+
+  React.useEffect(() => { saveLocal(DATA_STORAGE, { items, updatedAt: new Date().toISOString() }); }, [items]);
+
+  // ---- Google ----
+  React.useEffect(() => {
+    if (!settings.googleClientId) return;
+    let tries = 0;
+    const t = setInterval(() => {
+      if (googleInit(settings.googleClientId) || ++tries > 30) clearInterval(t);
+    }, 300);
+    return () => clearInterval(t);
+  }, [settings.googleClientId]);
+
+  const refreshGoogleEvents = React.useCallback(async () => {
+    if (!googleHasToken()) return;
+    try {
+      const now = new Date();
+      const evs = await gcalListEvents(new Date(now.getFullYear(), now.getMonth() - 1, 1), new Date(now.getFullYear(), now.getMonth() + 3, 1));
+      setGEvents(evs);
+    } catch (e) { console.error(e); }
+  }, []);
+
+  const connectGoogle = async () => {
+    if (!settings.googleClientId) { alert("先にOAuthクライアントIDを入力してください"); return; }
+    if (!googleInit(settings.googleClientId)) { alert("Googleの読み込みが終わっていません。少し待ってから再度お試しください"); return; }
+    try {
+      await googleSignIn(true);
+      // 自動バックアップで古い内容を上書きしないよう、先にドライブ側を確認してから接続済みにする
+      // ドライブのバックアップの方が新しければ取り込む
+      const remote = await gdriveLoadBackup();
+      if (remote && remote.items && remote.updatedAt) {
+        const local = loadLocal(DATA_STORAGE, {});
+        if (!local.updatedAt || remote.updatedAt > local.updatedAt) {
+          if (itemsRef.current.length === 0 || confirm("ドライブに新しいバックアップがあります。取り込みますか？（この端末のデータと統合します）")) {
+            setItems(mergeItems(itemsRef.current, remote.items));
+          }
+        }
+      }
+      setGConnected(true);
+      notify("Googleに接続しました");
+      await refreshGoogleEvents();
+    } catch (e) {
+      alert("Googleへの接続に失敗しました: " + e.message);
+    }
+  };
+  const disconnectGoogle = () => { googleSignOut(); setGConnected(false); setGEvents([]); notify("ログアウトしました"); };
+
+  // 自動バックアップ（変更から5秒後にまとめて保存）
+  React.useEffect(() => {
+    if (!gConnected || !settings.autoBackup) return;
+    const t = setTimeout(() => {
+      gdriveSaveBackup({ items, updatedAt: new Date().toISOString() }).catch((e) => console.error("backup failed", e));
+    }, 5000);
+    return () => clearTimeout(t);
+  }, [items, gConnected, settings.autoBackup]);
+
+  // 予定・ToDoをGoogleへ反映し、発行されたIDを保存する
+  const pushToGoogle = async (item) => {
+    if (!gConnected) return item;
+    try {
+      if (item.type === "schedule" && settings.syncCalendar && item.date) {
+        const ev = await gcalUpsertEvent(item);
+        return { ...item, gcalId: ev.id };
+      }
+      if (item.type === "todo" && settings.syncTasks) {
+        const t = await gtasksUpsert(item);
+        return { ...item, gtaskId: t.id };
+      }
+    } catch (e) {
+      console.error(e);
+      notify("Googleへの登録に失敗しました");
+    }
+    return item;
+  };
+  const removeFromGoogle = async (item) => {
+    if (!gConnected) return;
+    try {
+      if (item.gcalId) await gcalDeleteEvent(item.gcalId);
+      if (item.gtaskId) await gtasksDelete(item.gtaskId);
+    } catch (e) { console.error(e); }
+  };
+
+  // ---- 項目の追加・更新・削除 ----
+  const addItems = async (list) => {
+    const now = new Date().toISOString();
+    const created = list.map((d) => ({ ...d, id: newId(), createdAt: now, done: false }));
+    setItems((prev) => [...prev, ...created]);
+    for (const it of created) {
+      const synced = await pushToGoogle(it);
+      if (synced !== it) setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, gcalId: synced.gcalId, gtaskId: synced.gtaskId } : x)));
+    }
+    if (created.some((i) => i.type === "schedule")) refreshGoogleEvents();
+    const summary = created.map((i) => `${TYPE_META[i.type].label}「${(i.title || i.text).slice(0, 20)}」`).join("、");
+    notify(`登録: ${summary}`);
+    if (settings.speakBack && window.speechSynthesis) {
+      const u = new SpeechSynthesisUtterance(`${summary}を登録しました`);
+      u.lang = "ja-JP";
+      speechSynthesis.speak(u);
+    }
+  };
+  const updateItem = async (item) => {
+    const prev = itemsRef.current.find((x) => x.id === item.id);
+    let next = { ...item };
+    // 種類が変わったら、以前のGoogle側の登録は消して作り直す
+    if (prev && prev.type !== item.type) {
+      await removeFromGoogle(prev);
+      next = { ...next, gcalId: null, gtaskId: null };
+    }
+    setItems((list) => list.map((x) => (x.id === item.id ? next : x)));
+    if ((next.type === "schedule" || next.type === "todo")) {
+      const synced = await pushToGoogle(next);
+      if (synced !== next) setItems((list) => list.map((x) => (x.id === next.id ? { ...x, gcalId: synced.gcalId, gtaskId: synced.gtaskId } : x)));
+      if (next.type === "schedule") refreshGoogleEvents();
+    }
+  };
+  const deleteItem = async (item) => {
+    if (!confirm("削除しますか？")) return;
+    setItems((list) => list.filter((x) => x.id !== item.id));
+    await removeFromGoogle(item);
+    if (item.gcalId) refreshGoogleEvents();
+  };
+  const toggleTodo = (item) => updateItem({ ...item, done: !item.done, doneAt: !item.done ? new Date().toISOString() : null });
+
+  // ---- 音声・テキスト入力の処理 ----
+  const handleUtterance = async (text) => {
+    const base = todayYmd();
+    let list = [classifyByRules(text, base)];
+    if (getAnthropicApiKey()) {
+      setDrafts(list);
+      setBusy(true);
+      try {
+        const ai = await classifyByAI(text, base);
+        if (ai.length) list = ai;
+      } catch (e) {
+        console.error(e);
+      }
+      setBusy(false);
+    }
+    if (settings.autoCommit) { setDrafts(null); addItems(list); }
+    else setDrafts(list);
+  };
+  const speech = useSpeech(handleUtterance);
+
+  const importGoogleTasks = async () => {
+    if (!gConnected) { alert("先にGoogleにログインしてください"); return; }
+    try {
+      const tasks = await gtasksListOpen();
+      const known = new Set(itemsRef.current.map((i) => i.gtaskId).filter(Boolean));
+      const now = new Date().toISOString();
+      const fresh = tasks.filter((t) => !known.has(t.id) && t.title).map((t) => ({
+        id: newId(), type: "todo", title: t.title, text: t.notes || t.title,
+        date: t.due ? t.due.slice(0, 10) : null, time: null, done: false, createdAt: now, gtaskId: t.id,
+      }));
+      setItems((prev) => [...prev, ...fresh]);
+      notify(`${fresh.length}件のToDoを取り込みました`);
+    } catch (e) { alert("取り込みに失敗しました: " + e.message); }
+  };
+  const backupNow = async () => {
+    if (!gConnected) { alert("先にGoogleにログインしてください"); return; }
+    try { await gdriveSaveBackup({ items, updatedAt: new Date().toISOString() }); notify("バックアップしました"); }
+    catch (e) { alert("バックアップに失敗しました: " + e.message); }
+  };
+  const restoreNow = async () => {
+    if (!gConnected) { alert("先にGoogleにログインしてください"); return; }
+    try {
+      const remote = await gdriveLoadBackup();
+      if (!remote || !remote.items) { alert("バックアップが見つかりません"); return; }
+      setItems(mergeItems(itemsRef.current, remote.items));
+      notify(`${remote.items.length}件を復元しました`);
+    } catch (e) { alert("復元に失敗しました: " + e.message); }
+  };
+
+  const handlers = { onToggle: toggleTodo, onEdit: setEditing, onDelete: deleteItem };
+  const openTodos = items.filter((i) => i.type === "todo" && !i.done).length;
+  const tabs = [
+    ["today", "🏠", "今日"],
+    ["calendar", "📅", "カレンダー"],
+    ["todo", "✅", `ToDo${openTodos ? `(${openTodos})` : ""}`],
+    ["diary", "📔", "日記"],
+    ["thought", "💡", "考え"],
+    ["settings", "⚙️", "設定"],
+  ];
+
+  return (
+    <div className="max-w-xl mx-auto pb-56">
+      <header className="sticky top-0 z-30 bg-indigo-600 text-white px-4 py-3 flex items-center justify-between shadow">
+        <h1 className="font-bold text-lg">🎙 ライフノート</h1>
+        <button onClick={() => setTab("settings")} className={`text-xs px-2 py-1 rounded-full ${gConnected ? "bg-emerald-400/90" : "bg-white/20"}`}>
+          {gConnected ? "Google連携中" : "Google未接続"}
+        </button>
+      </header>
+
+      <nav className="flex overflow-x-auto bg-white border-b sticky top-[52px] z-20">
+        {tabs.map(([key, icon, label]) => (
+          <button key={key} onClick={() => setTab(key)}
+            className={`flex-1 min-w-[64px] py-2 text-xs flex flex-col items-center ${tab === key ? "text-indigo-600 border-b-2 border-indigo-600 font-bold" : "text-slate-500"}`}>
+            <span className="text-lg">{icon}</span>{label}
+          </button>
+        ))}
+      </nav>
+
+      <main className="p-4">
+        {tab === "today" && <TodayView items={items} gEvents={gEvents} {...handlers} />}
+        {tab === "calendar" && <CalendarView items={items} gEvents={gEvents} {...handlers} />}
+        {(tab === "todo" || tab === "diary" || tab === "thought") && <ListView key={tab} items={items} type={tab} {...handlers} />}
+        {tab === "settings" && (
+          <SettingsView settings={settings} setSettings={setSettings} items={items}
+            googleStatus={gConnected ? "✅ 接続中" : settings.googleClientId ? "未ログイン" : "クライアントID未設定"}
+            onGoogleConnect={connectGoogle} onGoogleDisconnect={disconnectGoogle}
+            onBackup={backupNow} onRestore={restoreNow} onImportTasks={importGoogleTasks} />
+        )}
+      </main>
+
+      {/* 音声入力エリア（常に画面下部に表示） */}
+      {!drafts && (
+        <div className="fixed inset-x-0 bottom-0 z-30 bg-gradient-to-t from-violet-100 via-violet-50 to-transparent pt-6 pb-5">
+          <div className="max-w-xl mx-auto px-4 flex flex-col items-center gap-3">
+            {speech.listening && (
+              <div className="w-full bg-white rounded-xl border p-3 text-slate-700 min-h-[48px] shadow">
+                {speech.interim || <span className="text-slate-400">聞いています… 話し終えたらもう一度タップ</span>}
+              </div>
+            )}
+            {speech.supported ? (
+              <button onClick={speech.listening ? speech.stop : speech.start}
+                className={`w-20 h-20 rounded-full text-white text-3xl shadow-xl flex items-center justify-center ${speech.listening ? "bg-rose-500 ln-recording" : "bg-indigo-600"}`}>
+                {speech.listening ? "■" : "🎙"}
+              </button>
+            ) : (
+              <div className="text-xs text-slate-500">このブラウザは音声入力に対応していません（Chrome / Safari をお使いください）</div>
+            )}
+            {!speech.listening && (
+              <form className="w-full flex gap-2" onSubmit={(e) => { e.preventDefault(); if (typed.trim()) { handleUtterance(typed.trim()); setTyped(""); } }}>
+                <input className="flex-1 border rounded-full px-4 py-2 bg-white text-sm" placeholder="文字でも入力できます（例: 明日15時に歯医者）"
+                  value={typed} onChange={(e) => setTyped(e.target.value)} />
+                <button className="px-4 rounded-full bg-indigo-600 text-white text-sm">追加</button>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {drafts && (
+        <ReviewPanel drafts={drafts} setDrafts={setDrafts} busy={busy}
+          onCancel={() => setDrafts(null)}
+          onCommit={() => { const list = drafts; setDrafts(null); addItems(list); }} />
+      )}
+      {editing && <EditDialog item={editing} onClose={() => setEditing(null)} onSave={(it) => { setEditing(null); updateItem(it); }} />}
+      {toast && <div className="fixed top-16 inset-x-0 z-50 flex justify-center"><div className="bg-slate-800 text-white text-sm px-4 py-2 rounded-full shadow">{toast}</div></div>}
+    </div>
+  );
+}
+
+// 2つの端末のデータを統合する（同じIDの項目はこの端末の内容を優先）
+function mergeItems(local, remote) {
+  const map = new Map();
+  for (const i of remote) map.set(i.id, i);
+  for (const i of local) map.set(i.id, { ...(map.get(i.id) || {}), ...i });
+  return [...map.values()];
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(LifeNoteApp));
+</script>
+
+<script>
+  function suzuBoot(attempt) {
+    attempt = attempt || 0;
+    if (typeof Babel === 'undefined' || typeof React === 'undefined' || typeof ReactDOM === 'undefined') {
+      if (attempt < 15) {
+        setTimeout(function() { suzuBoot(attempt + 1); }, 200);
+        return;
+      }
+      var el = document.getElementById('boot-error');
+      el.style.display = 'block';
+      el.textContent = 'CDNからのライブラリ読み込みに失敗しました（React/ReactDOM/Babelのいずれか）。\n'
+        + 'React defined: ' + (typeof React !== 'undefined')
+        + ' / ReactDOM defined: ' + (typeof ReactDOM !== 'undefined')
+        + ' / Babel defined: ' + (typeof Babel !== 'undefined');
+      return;
+    }
+    try {
+      var src = document.getElementById('app-source').textContent;
+      var output = Babel.transform(src, {
+        presets: [["react", { runtime: "classic" }]],
+      }).code;
+      var s = document.createElement('script');
+      s.textContent = output;
+      document.body.appendChild(s);
+    } catch (e) {
+      var el = document.getElementById('boot-error');
+      el.style.display = 'block';
+      el.textContent = '起動時エラー:\n' + (e.stack || e.message || e);
+      console.error(e);
+    }
+  }
+  suzuBoot();
+</script>
+
+</body>
+</html>
