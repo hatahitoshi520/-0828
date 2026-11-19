@@ -39,7 +39,7 @@
    URL（クエリ付き）へ自動的に移動して最新版を読み込み直す。
    ★修正のたびに、下のAPP_VERSIONの値を必ず変更すること。
    ============================================================ */
-const APP_VERSION = "2026-10-16-01";
+const APP_VERSION = "2026-11-19-01";
 async function suzuCheckForNewVersion() {
   try {
     const res = await fetch(location.pathname + "?_v=" + Date.now(), { cache: "no-store" });
@@ -1372,21 +1372,6 @@ function PosRegister() {
     showFlash("Excelファイルをダウンロードしました");
   };
 
-  useEffect(() => {
-    if (loading || autoCheckedRef.current) return;
-    autoCheckedRef.current = true;
-    const lastMonday = getMonday(new Date());
-    const prevMonday = new Date(lastMonday);
-    prevMonday.setDate(prevMonday.getDate() - 7);
-    const key = weekKeyOf(prevMonday);
-    const already = reports.some((r) => r.weekKey === key);
-    const hasData = orders.some((o) => o.time >= prevMonday.getTime() && o.time < lastMonday.getTime());
-    if (!already && hasData) {
-      generateReportForWeek(prevMonday, true);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading]);
-
   const generateReportForWeek = async (monday, silent) => {
     const key = weekKeyOf(monday);
     setAnalyzingWeek(key);
@@ -2606,7 +2591,6 @@ function PosRegister() {
     { key: "shift", label: "シフト", icon: Calendar },
     { key: "expense", label: "経費", icon: Receipt },
     { key: "history", label: "履歴", icon: History },
-    { key: "report", label: "レポート", icon: TrendingUp },
     { key: "check", label: "チェック", icon: Check },
     { key: "menu", label: "品目", icon: Settings },
   ];
@@ -3188,6 +3172,19 @@ function PosRegister() {
 
         {tab === "history" && (
           <div className="p-3 space-y-3">
+            <div>
+              <div className="text-amber-400 text-xs font-bold tracking-widest mb-1.5">月次比較（全端末共有）</div>
+              <div className="grid grid-cols-2 gap-2">
+                {[buildMonthStats(orders, new Date()), buildMonthStats(orders, new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1))].map((m, i) => (
+                  <div key={i} className="bg-slate-800 rounded-lg px-3 py-2 border border-slate-700">
+                    <div className="text-slate-400 text-xs">{m.label}{i === 0 ? "（今月）" : "（先月）"}</div>
+                    <div className="text-amber-300 font-bold">{yen(m.total)}</div>
+                    <div className="text-slate-500 text-[11px]">{m.orderCount}件</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
             <div className="flex items-center justify-between">
               <div className="text-sm text-slate-400">会計履歴（全端末共有・{orders.length}件）</div>
               {orders.length > 0 && (
@@ -3221,129 +3218,6 @@ function PosRegister() {
                 </div>
               </div>
             ))}
-          </div>
-        )}
-
-        {tab === "report" && (
-          <div className="p-3 space-y-4">
-            <div>
-              <div className="text-amber-400 text-xs font-bold tracking-widest mb-1.5">月次比較（全端末共有）</div>
-              <div className="grid grid-cols-2 gap-2">
-                {[buildMonthStats(orders, new Date()), buildMonthStats(orders, new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1))].map((m, i) => (
-                  <div key={i} className="bg-slate-800 rounded-lg px-3 py-2 border border-slate-700">
-                    <div className="text-slate-400 text-xs">{m.label}{i === 0 ? "（今月）" : "（先月）"}</div>
-                    <div className="text-amber-300 font-bold">{yen(m.total)}</div>
-                    <div className="text-slate-500 text-[11px]">{m.orderCount}件</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="bg-teal-900/40 rounded-lg p-3 border border-teal-800">
-              <div className="text-teal-300 text-xs font-bold tracking-widest mb-1.5">営業終了処理</div>
-              <div className="flex items-center justify-between mb-2">
-                <div className="text-sm text-slate-300">本日売上</div>
-                <div className="text-amber-300 font-bold text-lg">{yen(todayTotal)}</div>
-              </div>
-              <button
-                onClick={sendClosingReportToLine}
-                className="w-full bg-[#06C755] text-white rounded-lg py-2.5 text-sm font-bold flex items-center justify-center gap-1.5"
-              >
-                <Send size={14} /> 本日の営業を終了する（LINEに送信）
-              </button>
-              <button
-                onClick={copyClosingReport}
-                className="w-full bg-slate-700 text-stone-100 rounded-lg py-2 text-sm font-bold flex items-center justify-center gap-1.5 mt-2"
-              >
-                <Copy size={14} /> テキストをコピー
-              </button>
-              <div className="text-[11px] text-slate-500 mt-1.5">
-                タップするとLINEアプリが開き、本日の売上サマリーを友だち・グループに送信できます（LINE未インストールの場合はブラウザで開きます）。
-              </div>
-            </div>
-
-            <div>
-              <div className="text-amber-400 text-xs font-bold tracking-widest mb-1.5">今日の喫茶店日報（ホームページ・ブログ投稿用）</div>
-              <DailyReportForm onSubmit={saveDailyReport} />
-              {dailyReports.length > 0 && (
-                <div className="space-y-2 mt-2">
-                  {dailyReports.slice(0, 14).map((r) => (
-                    <div key={r.id} className="bg-slate-800 rounded-lg p-3 border border-slate-700">
-                      <div className="flex justify-between items-center mb-1">
-                        <div className="font-bold text-sm text-amber-300">
-                          {new Date(r.date + "T00:00:00").toLocaleDateString("ja-JP", { month: "2-digit", day: "2-digit" })}
-                        </div>
-                        <button onClick={() => copyDailyReportText(r)} className="text-xs bg-slate-700 rounded-lg px-2.5 py-1 flex items-center gap-1">
-                          <Copy size={11} /> コピー
-                        </button>
-                      </div>
-                      <div className="text-xs text-stone-300 leading-relaxed">{r.oneLiner || r.impressive || "（本文なし）"}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="bg-teal-900/40 rounded-lg p-3 border border-teal-800">
-              <div className="text-teal-300 text-xs font-bold tracking-widest mb-1.5">店舗エリア設定（天気・地域イベント検索用）</div>
-              <div className="flex gap-2">
-                <input
-                  placeholder="例: 東京都渋谷区"
-                  className="flex-1 bg-slate-900 rounded px-2 py-1.5 text-sm border border-slate-700"
-                  value={storeAreaDraft}
-                  onChange={(e) => setStoreAreaDraft(e.target.value)}
-                />
-                <button onClick={saveStoreArea} className="bg-amber-500 text-slate-900 rounded-lg px-3 py-1.5 text-sm font-bold shrink-0">
-                  保存
-                </button>
-              </div>
-            </div>
-
-            <div>
-              <div className="text-amber-400 text-xs font-bold tracking-widest mb-1.5">日別実績（直近14日・全端末共有）</div>
-              {dailyStats.length === 0 && <div className="text-slate-500 text-sm text-center py-6">まだデータがありません</div>}
-              <div className="space-y-1.5">
-                {dailyStats.map(([d, v]) => (
-                  <div key={d} className="flex items-center justify-between bg-slate-800 rounded-lg px-3 py-2 text-sm border border-slate-700">
-                    <span className="text-slate-300">{d}</span>
-                    <span className="text-slate-400 text-xs">{v.count}件</span>
-                    <span className="text-amber-300 font-bold">{yen(v.total)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <div className="text-amber-400 text-xs font-bold tracking-widest">週次AI分析</div>
-                <button
-                  onClick={() => generateReportForWeek(prevMonday, false)}
-                  disabled={analyzingWeek === weekKeyOf(prevMonday)}
-                  className="flex items-center gap-1 text-xs bg-teal-700 rounded-lg px-2.5 py-1.5 font-bold disabled:opacity-50"
-                >
-                  <Sparkles size={12} />
-                  {weekLabelOf(prevMonday)}分を分析
-                </button>
-              </div>
-              {analysisError && <div className="text-rose-300 text-xs mb-2">{analysisError}</div>}
-              {reports.length === 0 && (
-                <div className="text-slate-500 text-sm text-center py-6">まだ週次分析がありません</div>
-              )}
-              <div className="space-y-2">
-                {reports.map((r) => (
-                  <div key={r.weekKey} className="bg-slate-800 rounded-lg p-3 border border-slate-700">
-                    <div className="flex justify-between items-center mb-1">
-                      <div className="font-bold text-sm text-amber-300">{r.weekLabel}</div>
-                      <div className="text-xs text-slate-400">
-                        {r.orderCount}件 ・ {yen(r.total)}
-                      </div>
-                    </div>
-                    <div className="text-xs text-stone-200 whitespace-pre-wrap leading-relaxed">{r.text}</div>
-                    <div className="text-[10px] text-slate-500 mt-1.5">生成: {timeLabel(r.generatedAt)}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
           </div>
         )}
 
