@@ -1,0 +1,21 @@
+{
+  "name": "ライフノート",
+  "short_name": "ライフノート",
+  "description": "音声で日記・ToDo・考えたこと・予定をまとめて管理",
+  "id": "./life-note.html",
+  "start_url": "./life-note.html",
+  "scope": "./life-note",
+  "display": "standalone",
+  "orientation": "portrait",
+  "lang": "ja",
+  "background_color": "#f5f3ff",
+  "theme_color": "#4f46e5",
+  "icons": [
+    { "src": "life-note-icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "life-note-icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "life-note-icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "すぐに話す", "short_name": "話す", "url": "./life-note.html?mic=1", "icons": [{ "src": "life-note-icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}
