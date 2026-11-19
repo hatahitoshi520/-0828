@@ -39,7 +39,7 @@
    URL（クエリ付き）へ自動的に移動して最新版を読み込み直す。
    ★修正のたびに、下のAPP_VERSIONの値を必ず変更すること。
    ============================================================ */
-const APP_VERSION = "2026-11-19-02";
+const APP_VERSION = "2026-11-19-03";
 async function suzuCheckForNewVersion() {
   try {
     const res = await fetch(location.pathname + "?_v=" + Date.now(), { cache: "no-store" });
@@ -1476,7 +1476,6 @@ function PosRegister() {
       cart[key] = { key, itemId: item.id, name, price: 0, qty: existing ? existing.qty + 1 : 1 };
       return { entryTime: t.entryTime || Date.now(), cart };
     });
-    setGoogleReviewOpen(false);
     showFlash(`${name} を追加しました（¥0）`);
   };
 
@@ -1556,6 +1555,11 @@ function PosRegister() {
   const cartLines = Object.values(activeTable.cart || {});
   const cartTotal = cartLines.reduce((s, l) => s + l.price * l.qty, 0);
   const cartCount = cartLines.reduce((s, l) => s + l.qty, 0);
+  // ★卓によって人数が異なるため、クチコミ特典はこの卓で何点追加済みかを
+  // 表示し、人数分（レビューをくれた人数分）だけ続けて追加できるようにする。
+  const googleReviewFreebieCount = cartLines
+    .filter((l) => l.name.includes("[クチコミ特典]"))
+    .reduce((s, l) => s + l.qty, 0);
 
   useEffect(() => {
     const el = cartBarRef.current;
@@ -2695,11 +2699,15 @@ function PosRegister() {
             onClick={() => setGoogleReviewOpen((v) => !v)}
             className="w-full bg-indigo-700 text-white rounded-lg py-2 text-xs font-bold flex items-center justify-center gap-1.5 mb-2"
           >
-            <Star size={13} /> Googleクチコミ割引（コーヒー・紅茶・煮抜きを1点サービス）
+            <Star size={13} /> Googleクチコミ割引
+            {googleReviewFreebieCount > 0 ? `（${googleReviewFreebieCount}点サービス済み）` : "（コーヒー・紅茶・煮抜きをサービス）"}
           </button>
           {googleReviewOpen && (
             <div className="bg-slate-800 border border-indigo-700 rounded-lg p-2.5 mb-2 space-y-2">
-              <div className="text-[11px] text-slate-400">サービスする1点を選んでください（¥0でカートに追加されます）</div>
+              <div className="text-[11px] text-slate-400">
+                レビューをくれた人数分、続けて選べます（1人1点・¥0でカートに追加されます）。
+                {googleReviewFreebieCount > 0 && <span className="text-indigo-300 font-bold"> 現在{googleReviewFreebieCount}点追加済み</span>}
+              </div>
               <div className="grid grid-cols-2 gap-1.5">
                 <button onClick={() => addGoogleReviewFreebie("dr1", "Hot")} className="bg-slate-700 rounded-lg py-2 text-xs font-bold">
                   コーヒー Hot
@@ -2718,7 +2726,7 @@ function PosRegister() {
                 </button>
               </div>
               <button onClick={() => setGoogleReviewOpen(false)} className="w-full text-[11px] text-slate-500">
-                閉じる
+                選び終わったら閉じる
               </button>
             </div>
           )}
