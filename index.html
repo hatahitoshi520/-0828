@@ -39,7 +39,7 @@
    URL（クエリ付き）へ自動的に移動して最新版を読み込み直す。
    ★修正のたびに、下のAPP_VERSIONの値を必ず変更すること。
    ============================================================ */
-const APP_VERSION = "2026-11-19-01";
+const APP_VERSION = "2026-11-19-02";
 async function suzuCheckForNewVersion() {
   try {
     const res = await fetch(location.pathname + "?_v=" + Date.now(), { cache: "no-store" });
@@ -269,6 +269,11 @@ const Receipt = (p) => (
   </Icon>
 );
 const Send = (p) => <Icon {...p}><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9" /></Icon>;
+const Star = (p) => (
+  <Icon {...p}>
+    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+  </Icon>
+);
 const Copy = (p) => (
   <Icon {...p}>
     <rect x="9" y="9" width="13" height="13" rx="2" />
@@ -1094,6 +1099,7 @@ function PosRegister() {
   const [modalDrinkId, setModalDrinkId] = useState(null);
   const [modalDrinkTemp, setModalDrinkTemp] = useState(null);
   const [modalTopping, setModalTopping] = useState("none");
+  const [googleReviewOpen, setGoogleReviewOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
   const [analyzingWeek, setAnalyzingWeek] = useState(null);
   const [analysisError, setAnalysisError] = useState("");
@@ -1455,6 +1461,23 @@ function PosRegister() {
       cart[key] = { key, itemId: item.id, name, price: option.price, qty: existing ? existing.qty + 1 : 1 };
       return { entryTime: t.entryTime || Date.now(), cart };
     });
+  };
+
+  // ★Googleクチコミ割引：コーヒー・紅茶・煮抜きのいずれか1点を無料(¥0)でカートに追加する。
+  // 通常注文と混同しないよう、名前に必ず「[クチコミ特典]」を付け、カートのキーも別管理にする。
+  const addGoogleReviewFreebie = async (itemId, variant) => {
+    const item = menuItems.find((m) => m.id === itemId);
+    if (!item) return;
+    const name = item.name + (variant ? ` ${variant}` : "") + " [クチコミ特典]";
+    const key = item.id + "|クチコミ特典|" + (variant || "");
+    await mutateActiveTable((t) => {
+      const cart = { ...t.cart };
+      const existing = cart[key];
+      cart[key] = { key, itemId: item.id, name, price: 0, qty: existing ? existing.qty + 1 : 1 };
+      return { entryTime: t.entryTime || Date.now(), cart };
+    });
+    setGoogleReviewOpen(false);
+    showFlash(`${name} を追加しました（¥0）`);
   };
 
   const openItem = (item) => {
@@ -2667,6 +2690,39 @@ function PosRegister() {
               <RotateCcw size={12} /> リセット
             </button>
           </div>
+
+          <button
+            onClick={() => setGoogleReviewOpen((v) => !v)}
+            className="w-full bg-indigo-700 text-white rounded-lg py-2 text-xs font-bold flex items-center justify-center gap-1.5 mb-2"
+          >
+            <Star size={13} /> Googleクチコミ割引（コーヒー・紅茶・煮抜きを1点サービス）
+          </button>
+          {googleReviewOpen && (
+            <div className="bg-slate-800 border border-indigo-700 rounded-lg p-2.5 mb-2 space-y-2">
+              <div className="text-[11px] text-slate-400">サービスする1点を選んでください（¥0でカートに追加されます）</div>
+              <div className="grid grid-cols-2 gap-1.5">
+                <button onClick={() => addGoogleReviewFreebie("dr1", "Hot")} className="bg-slate-700 rounded-lg py-2 text-xs font-bold">
+                  コーヒー Hot
+                </button>
+                <button onClick={() => addGoogleReviewFreebie("dr1", "Ice")} className="bg-slate-700 rounded-lg py-2 text-xs font-bold">
+                  コーヒー Ice
+                </button>
+                <button onClick={() => addGoogleReviewFreebie("dr2", "Hot")} className="bg-slate-700 rounded-lg py-2 text-xs font-bold">
+                  紅茶 Hot
+                </button>
+                <button onClick={() => addGoogleReviewFreebie("dr2", "Ice")} className="bg-slate-700 rounded-lg py-2 text-xs font-bold">
+                  紅茶 Ice
+                </button>
+                <button onClick={() => addGoogleReviewFreebie("add1", null)} className="bg-slate-700 rounded-lg py-2 text-xs font-bold col-span-2">
+                  煮抜き
+                </button>
+              </div>
+              <button onClick={() => setGoogleReviewOpen(false)} className="w-full text-[11px] text-slate-500">
+                閉じる
+              </button>
+            </div>
+          )}
+
           <button
             onClick={sendClosingReportToLine}
             className="w-full bg-[#06C755] text-white rounded-lg py-2 text-xs font-bold flex items-center justify-center gap-1.5 mb-2"
